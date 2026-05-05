@@ -1,0 +1,104 @@
+@startuml 02_er_diagram
+title Зураг 3.2. Өгөгдлийн ерөнхий схем — Boloroo SQLite ба FAISS
+
+' Бүх хүснэгт нь backend/app/db/database.py:init_db() DDL-аас гарсан
+
+skinparam linetype ortho
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+
+entity "documents" as documents {
+  * **id** : INTEGER <<PK, AUTOINCREMENT>>
+  --
+  * title : TEXT NOT NULL
+  * filename : TEXT NOT NULL <<UNIQUE>>
+    source_type : TEXT DEFAULT 'pdf'
+    upload_date : TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    page_count : INTEGER DEFAULT 0
+    chunk_count : INTEGER DEFAULT 0
+    status : TEXT DEFAULT 'active'
+    --
+    Идэвхтэй / устгагдсан (soft delete)
+}
+
+entity "chunks" as chunks {
+  * **id** : INTEGER <<PK, AUTOINCREMENT>>
+  --
+  * document_id : INTEGER <<FK → documents.id>>
+  * chunk_id : TEXT NOT NULL <<UNIQUE>>
+  * chunk_index : INTEGER NOT NULL
+  * text : TEXT NOT NULL
+    page_number : INTEGER
+    char_count : INTEGER
+    metadata_json : TEXT
+    --
+    is_faq, faq_question нь metadata_json дотор
+}
+
+entity "chat_logs" as chat_logs {
+  * **id** : INTEGER <<PK, AUTOINCREMENT>>
+  --
+  * query : TEXT NOT NULL
+  * answer : TEXT NOT NULL
+    sources_json : TEXT
+    safety_label : TEXT DEFAULT 'safe'
+    safety_confidence : REAL DEFAULT 1.0
+    model_used : TEXT
+    tokens_used : INTEGER DEFAULT 0
+    response_time_ms : INTEGER
+    timestamp : TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    --
+    Анонимтай (user_id байхгүй)
+}
+
+entity "feedback" as feedback {
+  * **id** : INTEGER <<PK, AUTOINCREMENT>>
+  --
+  * chat_id : INTEGER <<FK → chat_logs.id>>
+  * rating : INTEGER NOT NULL <<CHECK IN (-1,1)>>
+    comment : TEXT
+    timestamp : TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+}
+
+' FAISS — file-based, SQL-аас гадуур, гэхдээ chat_logs.sources_json
+' дотор chunk_id текстээр denormalized байдлаар хадгалагдана.
+entity "FAISS Index\n(file-based)" as faiss_idx <<external>> {
+  index.faiss : binary FAISS IndexFlatIP
+  --
+  N vector × 384 dim (float32)
+  3408 vector (одоогоор)
+}
+
+entity "chunks.pkl\n(file-based)" as chunks_pkl <<external>> {
+  pickle: list[Chunk]
+  --
+  Chunk(chunk_id, text, source_file,
+        page_number, chunk_index, metadata)
+}
+
+documents ||--o{ chunks : "1 баримт → N chunk\n(FK document_id)"
+chat_logs ||--o{ feedback : "1 чат → N санал\n(FK chat_id)"
+
+chunks ..> chunks_pkl : "ижил chunk_id\n(SQL ↔ pickle\nхосолсон бичилт)"
+chunks ..> faiss_idx : "vector index\n(нэг chunk = нэг vector)"
+chat_logs ..> chunks : "sources_json: list of\nchunk_id, source_file\n(denormalized)"
+
+note right of documents
+  **Index:**
+  • idx_chunks_document
+    ON chunks(document_id)
+  • idx_chat_logs_timestamp
+    ON chat_logs(timestamp)
+  • idx_feedback_chat
+    ON feedback(chat_id)
+end note
+
+note bottom of chunks
+  **Зөрчил (одоогоор):**
+  scripts/ingest.py нь FAISS-д
+  бичдэг боловч SQLite chunks
+  хүснэгтэд бичдэггүй.
+  → Runtime mismatch (FIX_PLAN_MN.md)
+end note
+
+@enduml

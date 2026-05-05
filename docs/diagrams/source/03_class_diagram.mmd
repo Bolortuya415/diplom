@@ -1,0 +1,152 @@
+---
+title: "Зураг 3.3. Класс диаграм"
+---
+classDiagram
+    class ChatService {
+        +RAGPipeline rag
+        +AnswerGenerator generator
+        +SensitiveContentClassifier classifier
+        +initialize_with_rag(rag) void
+        +process_query(query, category) dict
+        -_build_response(...) dict
+        -_log_chat(...) int
+    }
+
+    class IngestService {
+        +RAGPipeline rag
+        +ingest_file(path, title) dict
+        +list_documents() list~dict~
+        +delete_document(doc_id) bool
+    }
+
+    class RAGPipeline {
+        +RAGConfig config
+        +EmbeddingManager embedding_manager
+        -bool _initialized
+        +initialize() bool
+        +is_ready bool
+        +ingest_document(path) dict
+        +ingest_directory(path) list~dict~
+        +search(query, top_k) list~dict~
+    }
+
+    class EmbeddingManager {
+        +RAGConfig config
+        +SentenceTransformer model
+        +IndexFlatIP index
+        +list~Chunk~ chunks
+        +embed_texts(texts) ndarray
+        +embed_query(query) ndarray
+        +build_index(chunks) IndexFlatIP
+        +add_to_index(chunks) void
+        +search(query, top_k) list~dict~
+        +save(idx, chk) void
+        +load(idx, chk) bool
+    }
+
+    class AnswerGenerator {
+        +RAGConfig config
+        -str _ollama_chat_url
+        +generate(query, chunks) dict
+        +format_context(chunks) str
+        +format_sources(chunks) list~dict~
+        -_check_ollama() bool
+        -_deduplicate_chunks(chunks) list
+        -_extract_faq_answer(chunk) str
+    }
+
+    class SensitiveContentClassifier {
+        +sklearn.LogReg model
+        +TfidfVectorizer vectorizer
+        +float confidence_threshold
+        +dict label_map
+        +preprocess(text) str
+        +predict(text) dict
+        +predict_batch(texts) list~dict~
+    }
+
+    class RAGConfig {
+        <<dataclass>>
+        +str embedding_model
+        +int chunk_size
+        +int chunk_overlap
+        +int top_k
+        +float similarity_threshold
+        +str llm_model
+        +int llm_timeout
+        +str ollama_base_url
+        +str system_prompt
+    }
+
+    class Chunk {
+        <<dataclass>>
+        +str chunk_id
+        +str text
+        +str source_file
+        +int page_number
+        +int chunk_index
+        +dict metadata
+    }
+
+    class DocumentPage {
+        <<dataclass>>
+        +str text
+        +int page_number
+        +str source_file
+        +dict metadata
+    }
+
+    class ChatRequest {
+        <<Pydantic>>
+        +str message
+        +str category
+    }
+
+    class ChatResponse {
+        <<Pydantic>>
+        +str answer
+        +list~SourceCitation~ sources
+        +SafetyInfo safety
+        +int chat_id
+        +int response_time_ms
+        +str model_used
+    }
+
+    class SourceCitation {
+        <<Pydantic>>
+        +int ref_number
+        +str source_file
+        +str document_title
+        +int page_number
+        +str snippet
+        +float relevance_score
+        +list~str~ law_references
+    }
+
+    class SafetyInfo {
+        <<Pydantic>>
+        +str label
+        +float confidence
+        +bool is_safe
+    }
+
+    ChatService o-- RAGPipeline
+    ChatService o-- AnswerGenerator
+    ChatService o-- SensitiveContentClassifier
+    ChatService ..> ChatRequest : consumes
+    ChatService ..> ChatResponse : produces
+
+    IngestService o-- RAGPipeline
+
+    RAGPipeline o-- EmbeddingManager
+    RAGPipeline o-- RAGConfig
+    RAGPipeline ..> DocumentPage : uses
+    RAGPipeline ..> Chunk : uses
+
+    EmbeddingManager o-- RAGConfig
+    EmbeddingManager *-- Chunk
+
+    AnswerGenerator o-- RAGConfig
+
+    ChatResponse *-- SourceCitation
+    ChatResponse *-- SafetyInfo

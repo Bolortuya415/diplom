@@ -1,0 +1,124 @@
+@startuml 06_activity_rag_flow
+title Зураг 3.6. RAG боловсруулах үйл ажиллагааны диаграм
+
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+skinparam ActivityBackgroundColor #FAFAFA
+skinparam ActivityBorderColor #555
+
+|Frontend|
+start
+:Хэрэглэгчийн асуулт хүлээн авах;
+:Pydantic validate (1 ≤ len ≤ 2000);
+
+|ChatService|
+:_normalize(query)\n→ normalized;
+:_has_crisis_indicator(query)\n→ has_crisis flag;
+
+if (Identity question?\n_is_identity_question) then (тийм)
+  :_IDENTITY_RESPONSE буцаах;
+  stop
+endif
+
+if (Capability question?\n_is_capability_question) then (тийм)
+  :_CAPABILITY_RESPONSE буцаах;
+  stop
+endif
+
+if (normalized in _GREETINGS?) then (тийм)
+  :_GREETING_RESPONSE буцаах;
+  stop
+endif
+
+|Classifier|
+:clean_mongolian_text\n+ remove_stopwords;
+:TF-IDF transform (5000 char-ngram features);
+:LogisticRegression.predict_proba;
+if (confidence < 0.5) then (тийм)
+  :label = "safe";
+endif
+
+|ChatService|
+if (label in {self_harm, harassment}\n&& NOT has_crisis) then (тийм)
+  :downgrade → label = "safe";
+endif
+
+if (NOT is_safe) then (тийм)
+  :SAFETY_RESPONSES[label]\n(тусламжийн утас, хууль ишлэл);
+  :INSERT chat_logs (label);
+  stop
+endif
+
+if (normalized in _VAGUE_QUERIES\nOR len(normalized) ≤ 5) then (тийм)
+  :_CLARIFICATION_RESPONSE буцаах;
+  stop
+endif
+
+|RAG Pipeline|
+:search_query =\n_CATEGORY_CONTEXT[cat] + query;
+:embed_query → (1, 384) float32 vector;
+:FAISS index.search(fetch_k = max(top_k×4, 8));
+
+partition "Re-rank logic" {
+  :similarity_threshold (≥ 0.3) шүүлт;
+  :FAQ chunk: score += 0.12 boost;
+  :sort by score desc;
+  :take top_k=2;
+}
+
+if (chunks empty?) then (тийм)
+  :_UNCLEAR_INTENT_RESPONSE;
+  stop
+endif
+
+|Answer Generator|
+:format_sources(chunks)\n(law_refs, doc_title, score);
+
+if (top.is_faq && score ≥ 0.55?) then (FAQ fast-path)
+  :_extract_faq_answer\n→ metadata.faq_answer;
+  :model_used = "faq_direct";
+else (generic)
+  :_check_ollama() → tags reachable?;
+  if (Ollama down?) then (тийм)
+    :"Ollama ажиллахгүй..." буцаах;
+    :model_used = config.llm_model;
+    :error = "Ollama not running";
+    detach
+  endif
+
+  :_deduplicate_chunks (overlap > 60 char);
+  :format_context\n(numbered, truncate 250 char);
+
+  partition "Ollama prompt" {
+    :system_prompt = RAGConfig.system_prompt\n(Mongolian-only rules);
+    :user_message =\n[Асуулт] + [Эх сурвалж] + [Даалгавар];
+    :POST :11434/api/chat\ntemperature=0.15, num_predict=250;
+  }
+
+  if (Timeout > 90s?) then (тийм)
+    :_source_fallback()\nmodel_used = "source_fallback";
+  elseif (ConnectionError?) then (тийм)
+    :"Ollama ажиллахгүй..." буцаах;
+  elseif (Other Exception?) then (тийм)
+    :"Хариулт үүсгэхэд алдаа" буцаах;
+  else (success)
+    :_clean_llm_answer\n(strip "[1] file.pdf (х.3)" header);
+    :tokens_used = prompt_eval + eval;
+  endif
+endif
+
+|ChatService|
+:_looks_like_raw_snippet(answer)?;
+if (raw snippet leak detected?) then (тийм)
+  :answer = _UNCLEAR_INTENT;
+endif
+
+:INSERT chat_logs\n(query, answer, sources_json,\nsafety_label, model_used, response_ms);
+
+|Frontend|
+:JSON response render;
+:MessageBubble + SourcePanel + SafetyWarning;
+
+stop
+
+@enduml

@@ -1,0 +1,139 @@
+@startuml 04_sequence_chat_flow
+title Зураг 3.4. Хэрэглэгчийн асуултад хариулах дарааллын диаграм
+
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+skinparam sequenceMessageAlign center
+
+actor "Хэрэглэгч" as User
+participant "ChatPage\n(frontend/src/pages/ChatPage.jsx)" as FE
+participant "api.js\nsendChat()" as API
+participant "FastAPI route\nPOST /api/chat\n(routes.py:25)" as Route
+participant "ChatService\nprocess_query()\n(chat_service.py:272)" as Svc
+participant "Sensitive-\nClassifier\npredict()\n(inference.py:77)" as Clf
+participant "RAGPipeline\nsearch()\n(pipeline.py:97)" as RAG
+participant "EmbeddingManager\n(embeddings.py:105)" as Emb
+database "FAISS Index" as FAISS
+participant "AnswerGenerator\ngenerate()\n(generator.py:252)" as Gen
+participant "Ollama LLM\nlocalhost:11434" as Ollama
+database "SQLite\nchat_logs" as DB
+
+User -> FE : асуулт бичих + Enter
+FE -> API : sendChat(message, category)
+API -> Route : POST /api/chat\nJSON {message, category}
+Route -> Route : Pydantic ChatRequest validate\n(min=1, max=2000)
+Route -> Svc : process_query(query, category)
+
+== Step 1a: Identity shortcut ==
+Svc -> Svc : _is_identity_question(query)?
+alt match
+    Svc --> Route : _IDENTITY_RESPONSE
+    Route --> API : ChatResponse
+    API --> FE : JSON
+    FE --> User : "Би Болороо ..."
+end
+
+== Step 1b: Capability shortcut ==
+Svc -> Svc : _is_capability_question(query)?
+alt match
+    Svc --> Route : _CAPABILITY_RESPONSE
+end
+
+== Step 2: Greeting shortcut ==
+Svc -> Svc : query.lower() in _GREETINGS?
+alt match
+    Svc --> Route : _GREETING_RESPONSE
+end
+
+== Step 3: Safety classification ==
+Svc -> Clf : predict(query)
+Clf -> Clf : clean_mongolian_text + remove_stopwords
+Clf -> Clf : vectorizer.transform(...)
+Clf -> Clf : model.predict_proba(...)
+Clf --> Svc : {label, confidence, is_safe}
+
+== Step 4: Crisis downgrade ==
+Svc -> Svc : _has_crisis_indicator(query)?
+note right
+  self_harm/harassment + crisis word байхгүй
+  → safe-руу буцаах (false-positive хамгаалалт)
+end note
+
+== Step 5: Block unsafe ==
+alt is_safe == False
+    Svc -> DB : INSERT chat_logs (label, ...)
+    Svc --> Route : SAFETY_RESPONSES[label]\n(тусламжийн утас, хууль)
+    Route --> FE : ChatResponse + safety
+    FE --> User : Safety warning + хариу
+end
+
+== Step 6: Vague query ==
+Svc -> Svc : query in _VAGUE_QUERIES OR len <= 5?
+alt vague
+    Svc --> Route : _CLARIFICATION_RESPONSE
+end
+
+== Step 7: RAG retrieval ==
+Svc -> Svc : search_query = _CATEGORY_CONTEXT[cat] + query
+Svc -> RAG : search(search_query)
+RAG -> Emb : embed_query(query)
+Emb -> Emb : SentenceTransformer.encode\n(normalize=True)
+Emb --> RAG : np.float32 (1, 384)
+RAG -> Emb : index.search(query_emb, fetch_k)
+Emb -> FAISS : IndexFlatIP search
+FAISS --> Emb : scores, indices
+Emb -> Emb : filter score >= 0.3\nFAQ boost +0.12\nsort & take top_k
+Emb --> RAG : list[dict]
+RAG --> Svc : retrieved_chunks
+
+alt retrieved == []
+    Svc --> Route : _UNCLEAR_INTENT_RESPONSE
+end
+
+== Step 8: Answer generation ==
+Svc -> Gen : generate(query, retrieved_chunks)
+Gen -> Gen : format_sources(chunks)\n(law_refs, doc_title)
+
+alt FAQ fast-path: top.is_faq && score >= 0.55
+    Gen -> Gen : _extract_faq_answer(chunk)
+    Gen --> Svc : {answer: faq_answer,\nmodel_used: "faq_direct"}
+else generic
+    Gen -> Ollama : GET /api/tags (health check)
+    alt Ollama down
+        Gen --> Svc : "Ollama ажиллахгүй байна..."
+    end
+
+    Gen -> Gen : format_context (truncate 250 char)
+    Gen -> Ollama : POST /api/chat\n{model, system, user, options}
+    alt timeout (90s)
+        Gen --> Svc : _source_fallback()
+    else success
+        Ollama --> Gen : {message: {content: text}, eval_count: N}
+        Gen -> Gen : _clean_llm_answer (strip header)
+        Gen --> Svc : {answer, sources, tokens_used}
+    end
+end
+
+Svc -> Svc : _looks_like_raw_snippet(answer)?
+alt leak detected
+    Svc -> Svc : answer = _UNCLEAR_INTENT_RESPONSE
+end
+
+== Step 9: Logging ==
+Svc -> DB : INSERT chat_logs\n(query, answer, sources_json,\nsafety_label, model_used, response_ms)
+DB --> Svc : chat_id
+
+Svc --> Route : {answer, sources, safety, chat_id, ms, model_used}
+Route --> API : ChatResponse JSON
+API --> FE : data
+FE -> FE : setState messages + render\nMessageBubble + SourcePanel
+FE --> User : Хариу + sources panel + feedback товч
+
+== Optional: Feedback ==
+User -> FE : 👍 / 👎 click
+FE -> API : submitFeedback(chat_id, rating)
+API -> Route : POST /api/feedback
+Route -> DB : INSERT feedback (chat_id, rating)
+Route --> API : {feedback_id}
+
+@enduml

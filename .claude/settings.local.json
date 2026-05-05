@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where python:*)",
+      "Bash(npx --no-install @mermaid-js/mermaid-cli --version)",
+      "Read(//tmp/**)",
+      "Bash(npm install *)",
+      "Bash(python -c \"import numpy, scipy; print\\('audio libs ok'\\)\")",
+      "Bash(python -c \"from PIL import Image, ImageDraw, ImageFont; import wave; print\\('all ok'\\)\")",
+      "Bash(python generate.py)",
+      "Bash(python solution/solve.py)",
+      "Bash(python -c ' *)",
+      "Bash(python challenge/khunkher.py \"haruulzangi{vm_b1ts_d4nce_t0_th3_kh4ans_drum}\")",
+      "Bash(python challenge/khunkher.py \"haruulzangi{wrong_flag}\")",
+      "Bash(python challenge/khunkher.py \"haruulzangi{wrong_flag_attempt_xxxxxxxxxxxxxxx}\")",
+      "Bash(python)",
+      "Bash(python _solutions/forensic/shivnegch/solve.py)",
+      "Bash(python _solutions/reverse/khunkher/solve.py)",
+      "Bash(python _solutions/misc/ovoo/solve.py)"
+    ]
+  }
+}

@@ -1,0 +1,111 @@
+@startuml 07_data_flow_diagram
+title Зураг 3.7. Өгөгдлийн урсгалын диаграм — Boloroo чатбот
+
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+skinparam linetype ortho
+
+' Gane-Sarson хэв маягийн бус, FlowChart хэлбэрээр
+
+actor "Хэрэглэгч" as User
+actor "Админ" as Admin
+
+rectangle "Frontend\n(React state)" as FE {
+  rectangle "Chat input form" as Form
+  rectangle "Upload form" as Upload
+  rectangle "Message list +\nSource panel" as Render
+}
+
+rectangle "Backend боловсруулалт" as BE {
+  rectangle "1. Pydantic validate\nChatRequest / IngestRequest" as Validate
+  rectangle "2. ChatService.process_query()\n(routing logic)" as Routing
+  rectangle "3. Classifier predict\n(TF-IDF → LR → label dict)" as Cls
+  rectangle "4. Query embedding\nstr → np.float32 (1, 384)" as QEmb
+  rectangle "5. FAISS search\nscores + indices" as Search
+  rectangle "6. Re-rank + filter\n→ list[dict]" as Rank
+  rectangle "7. format_context\nstr (250-char truncated)" as Fmt
+  rectangle "8. Ollama prompt\n→ raw text" as LLM
+  rectangle "9. _clean_llm_answer\n→ final str" as Clean
+  rectangle "10. format_sources\n→ list[SourceCitation]" as Sources
+  rectangle "11. Build ChatResponse\n(answer, sources, safety)" as Build
+  rectangle "12. INSERT chat_logs\n+ optional INSERT feedback" as Log
+}
+
+rectangle "Indexing (offline)\nscripts/ingest.py" as Ingest {
+  rectangle "load_document\n→ list[DocumentPage]" as Load
+  rectangle "chunk_documents\n→ list[Chunk]" as Chunk
+  rectangle "embed_texts\n→ np.float32 (N, 384)" as Embed
+  rectangle "INSERT documents/chunks\n+ FAISS write_index" as Persist
+}
+
+database "Эх баримт\ndata/raw/" as Raw
+database "FAISS Index\nindex.faiss + chunks.pkl" as FAISS
+database "SQLite\nboloroo.db" as DB
+database "ML моделүүд\ntraining/models/*.pkl" as Models
+cloud "Ollama LLM\nlocalhost:11434" as Ollama
+
+' ── Query flow ──
+User --> Form : Mongolian text
+Form --> Validate : JSON {message, category}
+Validate --> Routing : ChatRequest object
+
+Routing --> Cls : str → predict
+Cls --> Models : joblib.load (startup)
+Cls --> Routing : {label, confidence, is_safe}
+
+Routing --> QEmb : prefix + query
+QEmb --> Search : (1, 384) float32
+Search --> FAISS : query vector
+FAISS --> Search : scores, indices (numpy)
+Search --> Rank : raw hits
+Rank --> Fmt : list[dict {chunk_id, text, score, ...}]
+
+Rank --> Sources : same chunks
+Sources --> Build : list[SourceCitation]
+
+Fmt --> LLM : numbered context string
+LLM --> Ollama : POST /api/chat (system + user)
+Ollama --> LLM : {message: {content}, eval_count}
+LLM --> Clean : raw answer
+Clean --> Build : final answer str
+
+Build --> Log : full response dict
+Log --> DB : chat_logs row
+Build --> Render : ChatResponse JSON
+Render --> User : bubble + sources + feedback btn
+
+' ── Feedback flow ──
+User --> Render : 👍/👎 click
+Render --> Log : POST /api/feedback (chat_id, rating)
+Log --> DB : feedback row
+
+' ── Ingestion flow ──
+Admin --> Upload : .pdf / .txt
+Upload --> Validate : multipart form
+Validate --> Load : valid file path
+Raw --> Load : байт уншигдана
+Load --> Chunk : list[DocumentPage]
+Chunk --> Embed : list[Chunk]
+Embed --> Persist : (N, 384) float32 + chunks
+Persist --> FAISS : write_index + pickle.dump
+Persist --> DB : INSERT documents + chunks
+
+note right of Routing
+  Хариу формат:
+  {
+    answer: str,
+    sources: list[SourceCitation],
+    safety: SafetyInfo,
+    chat_id: int,
+    response_time_ms: int,
+    model_used: str
+  }
+end note
+
+note bottom of FAISS
+  Vector store нь файл хэлбэртэй.
+  Backend startup-д memory-руу
+  ачаалагдан, query үед хайлт хийгдэнэ.
+end note
+
+@enduml

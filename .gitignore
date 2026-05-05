@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data & Models (large files)
+data/vectors/*.faiss
+data/vectors/*.pkl
+training/models/*.pkl
+training/models/*.pt
+training/models/*.bin
+*.db
+
+# Node
+node_modules/
+frontend/dist/
+frontend/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker/volumes/
+
+# Jupyter
+.ipynb_checkpoints/

@@ -1,0 +1,74 @@
+---
+title: "Зураг 3.5. Баримт бичиг оруулах дарааллын диаграм"
+---
+sequenceDiagram
+    actor Admin as 🛡️ Админ
+    participant FE as AdminPage<br/>(React)
+    participant API as api.js<br/>uploadDocument()
+    participant Route as POST /api/ingest<br/>(routes.py)
+    participant ISvc as IngestService<br/>ingest_file()
+    participant RAG as RAGPipeline<br/>ingest_document()
+    participant Loader as DocumentLoader
+    participant Chunker as Chunker
+    participant Emb as EmbeddingManager
+    participant FAISS as FAISS Index<br/>+ chunks.pkl
+    participant SQL as SQLite<br/>documents + chunks
+    participant Raw as data/raw/
+
+    Admin->>FE: файл + title сонгох
+    Admin->>FE: "Оруулах" товч
+    FE->>API: uploadDocument(file, title)
+    API->>Route: POST /api/ingest<br/>multipart
+
+    Note over Route: Validation
+    Route->>Route: suffix in {.pdf, .txt}?
+    alt invalid
+        Route-->>FE: HTTP 400
+    end
+
+    Route->>Raw: shutil.copyfileobj
+    Route->>ISvc: ingest_file(path, title)
+    ISvc->>RAG: ingest_document(path)
+
+    Note over RAG,Loader: Текст гаргалт
+    RAG->>Loader: load_document(path)
+    alt PDF
+        Loader->>Loader: PyMuPDF<br/>page.get_text + clean
+    else TXT
+        Loader->>Loader: open utf-8 + clean
+    end
+    Loader-->>RAG: list[DocumentPage]
+
+    Note over RAG,Chunker: Chunking
+    RAG->>Chunker: chunk_documents(pages, 500, 50)
+    loop page бүрд
+        Chunker->>Chunker: _is_faq_text?
+        alt FAQ
+            Chunker->>Chunker: 1 chunk per Q+A<br/>metadata.is_faq=True
+        else generic
+            Chunker->>Chunker: char-level + boundary
+        end
+    end
+    Chunker-->>RAG: list[Chunk]
+
+    Note over RAG,FAISS: Embedding + Index
+    RAG->>Emb: add_to_index(chunks)
+    Emb->>Emb: encode (FAQ → асуулт only)
+    Emb->>FAISS: index.add(embeddings)
+    RAG->>Emb: save()
+    Emb->>FAISS: write_index + pickle.dump
+
+    RAG-->>ISvc: {file, pages, chunks, total_size}
+
+    Note over ISvc,SQL: SQLite метадата
+    ISvc->>SQL: INSERT documents
+    SQL-->>ISvc: doc_id
+    loop chunk бүрд
+        ISvc->>SQL: INSERT chunks
+    end
+
+    ISvc-->>Route: result dict
+    Route-->>API: IngestResponse JSON
+    API-->>FE: success
+    FE->>FE: loadData() refresh
+    FE-->>Admin: "N хуудас, M хэсэг"

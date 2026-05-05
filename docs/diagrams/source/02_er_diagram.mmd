@@ -1,0 +1,60 @@
+---
+title: "Зураг 3.2. Өгөгдлийн ерөнхий схем"
+---
+erDiagram
+    documents ||--o{ chunks : "1 — N (FK document_id)"
+    chat_logs ||--o{ feedback : "1 — N (FK chat_id)"
+
+    documents {
+        INTEGER id PK "AUTOINCREMENT"
+        TEXT title "NOT NULL"
+        TEXT filename "NOT NULL UNIQUE"
+        TEXT source_type "DEFAULT 'pdf'"
+        TIMESTAMP upload_date "DEFAULT CURRENT_TIMESTAMP"
+        INTEGER page_count "DEFAULT 0"
+        INTEGER chunk_count "DEFAULT 0"
+        TEXT status "active | deleted"
+    }
+
+    chunks {
+        INTEGER id PK "AUTOINCREMENT"
+        INTEGER document_id FK "→ documents.id"
+        TEXT chunk_id "NOT NULL UNIQUE"
+        INTEGER chunk_index "NOT NULL"
+        TEXT text "NOT NULL"
+        INTEGER page_number ""
+        INTEGER char_count ""
+        TEXT metadata_json "is_faq · faq_question"
+    }
+
+    chat_logs {
+        INTEGER id PK "AUTOINCREMENT"
+        TEXT query "NOT NULL"
+        TEXT answer "NOT NULL"
+        TEXT sources_json "JSON list"
+        TEXT safety_label "safe | hate_speech ..."
+        REAL safety_confidence "DEFAULT 1.0"
+        TEXT model_used "qwen2.5:7b | faq_direct ..."
+        INTEGER tokens_used "DEFAULT 0"
+        INTEGER response_time_ms ""
+        TIMESTAMP timestamp "DEFAULT CURRENT_TIMESTAMP"
+    }
+
+    feedback {
+        INTEGER id PK "AUTOINCREMENT"
+        INTEGER chat_id FK "→ chat_logs.id"
+        INTEGER rating "CHECK IN (-1, 1)"
+        TEXT comment ""
+        TIMESTAMP timestamp "DEFAULT CURRENT_TIMESTAMP"
+    }
+
+    FAISS_index_faiss }o..|| chunks : "1 vector ↔ 1 chunk (file-based)"
+    chunks_pkl }o..|| chunks : "pickle list[Chunk] (file-based)"
+
+    FAISS_index_faiss {
+        binary file "IndexFlatIP, 384-dim, 3408 vectors"
+    }
+
+    chunks_pkl {
+        binary pickle "list[Chunk] dataclass"
+    }

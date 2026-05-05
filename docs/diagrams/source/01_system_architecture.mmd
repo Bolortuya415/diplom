@@ -1,0 +1,67 @@
+---
+title: "Зураг 3.1. Системийн ерөнхий архитектур"
+---
+flowchart TB
+    User(["👤 Хэрэглэгч"])
+    Admin(["🛡️ Админ"])
+
+    subgraph FE ["Frontend — React + Vite (port 5173)"]
+        Landing["LandingPage<br/>3 ангилал"]
+        ChatUI["ChatPage<br/>чат UI + sources"]
+        AdminUI["AdminPage<br/>upload + stats"]
+        ApiJs["services/api.js<br/>fetch wrapper"]
+    end
+
+    subgraph BE ["Backend — FastAPI (port 8000)"]
+        Main["main.py<br/>Lifespan + CORS"]
+        Routes["api/routes.py<br/>7 endpoint"]
+        ChatSvc["ChatService<br/>6-step routing"]
+        IngestSvc["IngestService"]
+        Clf["SensitiveContent-<br/>Classifier"]
+    end
+
+    subgraph RAG ["RAG бүрэлдэхүүн (rag/)"]
+        Pipeline["RAGPipeline<br/>(facade)"]
+        Loader["DocumentLoader<br/>PyMuPDF / TXT"]
+        Chunker["Chunker<br/>FAQ-aware"]
+        Emb["EmbeddingManager<br/>MiniLM-L12"]
+        Gen["AnswerGenerator<br/>Ollama prompt"]
+    end
+
+    SQL[("SQLite<br/>data/boloroo.db<br/>documents · chunks<br/>chat_logs · feedback")]
+    FAISS[("FAISS Index<br/>index.faiss + chunks.pkl<br/>3408 vector")]
+    Raw[("Эх баримтууд<br/>data/raw/<br/>5 PDF + 7 TXT")]
+    Models[("ML моделүүд<br/>training/models/<br/>classifier · vectorizer")]
+    Ollama["🤖 Ollama LLM<br/>localhost:11434<br/>qwen2.5:7b"]
+
+    User -->|"ангилал сонгох"| Landing
+    User -->|"асуулт оруулах"| ChatUI
+    Admin -->|"баримт upload"| AdminUI
+
+    Landing -->|"category state"| ChatUI
+    ChatUI --> ApiJs
+    AdminUI --> ApiJs
+    ApiJs -->|"HTTP/JSON<br/>Vite proxy /api"| Routes
+
+    Main --> Routes
+    Main -->|"lifespan init"| ChatSvc
+    Main -->|"lifespan init"| Pipeline
+    Routes --> ChatSvc
+    Routes --> IngestSvc
+
+    ChatSvc -->|"predict"| Clf
+    ChatSvc -->|"search"| Pipeline
+    ChatSvc -->|"generate"| Gen
+    ChatSvc -->|"INSERT chat_logs"| SQL
+
+    IngestSvc -->|"ingest_document"| Pipeline
+    IngestSvc -->|"INSERT documents/chunks"| SQL
+
+    Pipeline --> Loader
+    Loader --> Raw
+    Pipeline --> Chunker
+    Pipeline --> Emb
+    Emb --> FAISS
+
+    Gen -->|"POST /api/chat"| Ollama
+    Clf --> Models

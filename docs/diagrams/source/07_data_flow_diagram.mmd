@@ -1,0 +1,80 @@
+---
+title: "Зураг 3.7. Өгөгдлийн урсгалын диаграм"
+---
+flowchart TB
+    User(["👤 Хэрэглэгч"])
+    Admin(["🛡️ Админ"])
+
+    subgraph Frontend ["Frontend (React state)"]
+        Form["Chat input"]
+        Upload["Upload form"]
+        Render["Message list + SourcePanel"]
+    end
+
+    subgraph Backend ["Backend боловсруулалт"]
+        V["1. Pydantic validate"]
+        R["2. ChatService.process_query"]
+        C["3. Classifier predict<br/>TF-IDF → LR → dict"]
+        QE["4. Query embedding<br/>str → (1, 384) float32"]
+        SE["5. FAISS search<br/>scores + indices"]
+        RR["6. Re-rank + filter<br/>→ list[dict]"]
+        FC["7. format_context<br/>250-char truncated"]
+        L["8. Ollama prompt<br/>→ raw text"]
+        CL["9. _clean_llm_answer"]
+        FS["10. format_sources<br/>→ list[SourceCitation]"]
+        BR["11. Build ChatResponse"]
+        Log["12. INSERT chat_logs<br/>(optional INSERT feedback)"]
+    end
+
+    subgraph Ingest ["Indexing (offline)"]
+        Ld["load_document<br/>→ list[DocumentPage]"]
+        Ch["chunk_documents<br/>→ list[Chunk]"]
+        Em["embed_texts<br/>→ (N, 384) float32"]
+        Ps["INSERT docs/chunks<br/>+ FAISS write"]
+    end
+
+    Raw[("data/raw/")]
+    FAISS[("FAISS index<br/>+ chunks.pkl")]
+    DB[("SQLite<br/>boloroo.db")]
+    Models[("ML моделүүд<br/>*.pkl")]
+    Ollama["🤖 Ollama LLM"]
+
+    User -->|"Mongolian text"| Form
+    Form -->|"JSON"| V
+    V -->|"ChatRequest"| R
+    R -->|"str"| C
+    C -->|"joblib.load (startup)"| Models
+    C -->|"label dict"| R
+
+    R -->|"prefix + query"| QE
+    QE -->|"vector"| SE
+    SE -->|"query"| FAISS
+    FAISS -->|"hits"| SE
+    SE -->|"raw hits"| RR
+    RR -->|"chunks"| FC
+    RR -->|"chunks"| FS
+
+    FC -->|"context str"| L
+    L -->|"POST /api/chat"| Ollama
+    Ollama -->|"content + eval"| L
+    L -->|"raw answer"| CL
+    CL -->|"final str"| BR
+    FS -->|"citations"| BR
+
+    BR -->|"response dict"| Log
+    Log --> DB
+    BR -->|"ChatResponse JSON"| Render
+    Render -->|"bubble + feedback"| User
+
+    User -->|"👍/👎"| Render
+    Render -->|"POST /feedback"| Log
+
+    Admin -->|".pdf / .txt"| Upload
+    Upload -->|"multipart"| V
+    V -->|"file path"| Ld
+    Raw -->|"bytes"| Ld
+    Ld -->|"DocumentPage"| Ch
+    Ch -->|"Chunk"| Em
+    Em -->|"vectors"| Ps
+    Ps --> FAISS
+    Ps --> DB

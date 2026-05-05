@@ -1,0 +1,104 @@
+---
+title: "Зураг 3.4. Хэрэглэгчийн асуултад хариулах дарааллын диаграм"
+---
+sequenceDiagram
+    actor User as 👤 Хэрэглэгч
+    participant FE as ChatPage<br/>(React)
+    participant API as api.js<br/>sendChat()
+    participant Route as POST /api/chat<br/>(routes.py)
+    participant Svc as ChatService<br/>process_query()
+    participant Clf as Classifier<br/>predict()
+    participant RAG as RAGPipeline<br/>search()
+    participant Emb as EmbeddingManager
+    participant FAISS as FAISS Index
+    participant Gen as AnswerGenerator<br/>generate()
+    participant Ollama as Ollama LLM<br/>:11434
+    participant DB as SQLite<br/>chat_logs
+
+    User->>FE: асуулт + Enter
+    FE->>API: sendChat(message, category)
+    API->>Route: POST /api/chat<br/>JSON
+    Route->>Route: Pydantic validate
+    Route->>Svc: process_query(query, category)
+
+    Note over Svc: Step 1a: Identity shortcut
+    Svc->>Svc: _is_identity_question?
+    alt match
+        Svc-->>Route: _IDENTITY_RESPONSE
+    end
+
+    Note over Svc: Step 1b: Capability shortcut
+    Svc->>Svc: _is_capability_question?
+    alt match
+        Svc-->>Route: _CAPABILITY_RESPONSE
+    end
+
+    Note over Svc: Step 2: Greeting
+    alt query in _GREETINGS
+        Svc-->>Route: _GREETING_RESPONSE
+    end
+
+    Note over Svc: Step 3: Safety classification
+    Svc->>Clf: predict(query)
+    Clf->>Clf: clean + TF-IDF transform
+    Clf->>Clf: model.predict_proba
+    Clf-->>Svc: {label, confidence, is_safe}
+
+    Note over Svc: Step 4: Crisis downgrade
+    Svc->>Svc: _has_crisis_indicator?
+
+    alt unsafe
+        Svc->>DB: INSERT chat_logs
+        Svc-->>Route: SAFETY_RESPONSES[label]
+        Route-->>FE: ChatResponse + safety
+        FE-->>User: Safety warning + хариу
+    end
+
+    Note over Svc: Step 5: Vague check
+    alt query vague OR len ≤ 5
+        Svc-->>Route: _CLARIFICATION_RESPONSE
+    end
+
+    Note over Svc: Step 6: RAG retrieval
+    Svc->>RAG: search(prefix + query)
+    RAG->>Emb: embed_query
+    Emb-->>RAG: (1, 384) float32
+    RAG->>FAISS: IndexFlatIP search
+    FAISS-->>RAG: scores + indices
+    RAG->>RAG: filter ≥0.3, FAQ boost +0.12, sort
+    RAG-->>Svc: top-k chunks
+
+    alt retrieved empty
+        Svc-->>Route: _UNCLEAR_INTENT
+    end
+
+    Note over Svc: Step 7: Generation
+    Svc->>Gen: generate(query, chunks)
+    Gen->>Gen: format_sources
+
+    alt FAQ fast-path (score ≥ 0.55)
+        Gen-->>Svc: faq_answer
+    else
+        Gen->>Ollama: GET /api/tags (health)
+        Gen->>Ollama: POST /api/chat<br/>system + context + query
+        alt timeout 90s
+            Gen-->>Svc: source_fallback
+        else success
+            Ollama-->>Gen: {content, eval_count}
+            Gen->>Gen: clean citation header
+            Gen-->>Svc: {answer, sources, tokens}
+        end
+    end
+
+    Svc->>Svc: _looks_like_raw_snippet?
+    Svc->>DB: INSERT chat_logs
+    DB-->>Svc: chat_id
+    Svc-->>Route: response dict
+    Route-->>FE: ChatResponse JSON
+    FE-->>User: Хариу + sources + feedback
+
+    Note over User,DB: Optional feedback
+    User->>FE: 👍 / 👎
+    FE->>API: submitFeedback(chat_id, rating)
+    API->>Route: POST /api/feedback
+    Route->>DB: INSERT feedback

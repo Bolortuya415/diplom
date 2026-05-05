@@ -1,0 +1,206 @@
+@startuml 03_class_diagram
+title Зураг 3.3. Класс диаграм — Boloroo системийн гол анги
+
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+skinparam linetype polyline
+
+' ───────── Backend service давхарга ─────────
+package "backend.app.services" {
+
+  class ChatService {
+    + rag : RAGPipeline
+    + generator : AnswerGenerator
+    + classifier : SensitiveContentClassifier
+    --
+    + initialize_with_rag(rag) : void
+    + process_query(query, category) : dict
+    - _build_response(...) : dict
+    - _log_chat(...) : int
+    - _looks_like_raw_snippet(answer) : bool
+  }
+
+  class IngestService {
+    + rag : RAGPipeline
+    --
+    + ingest_file(file_path, title) : dict
+    + list_documents() : list[dict]
+    + delete_document(doc_id) : bool
+  }
+}
+
+' ───────── RAG давхарга ─────────
+package "rag" {
+
+  class RAGConfig <<dataclass>> {
+    + embedding_model : str
+    + embedding_dimension : int = 384
+    + chunk_size : int = 500
+    + chunk_overlap : int = 50
+    + top_k : int = 2
+    + similarity_threshold : float = 0.3
+    + llm_model : str = "qwen2.5:7b"
+    + llm_temperature : float = 0.15
+    + llm_max_tokens : int = 250
+    + llm_timeout : int = 90
+    + ollama_base_url : str
+    + system_prompt : str
+    + vector_index_path : Path
+    + chunk_metadata_path : Path
+  }
+
+  class RAGPipeline {
+    + config : RAGConfig
+    + embedding_manager : EmbeddingManager
+    - _initialized : bool
+    --
+    + initialize() : bool
+    + is_ready : bool {property}
+    + ingest_document(file_path) : dict
+    + ingest_directory(dir_path) : list[dict]
+    + search(query, top_k) : list[dict]
+  }
+
+  class EmbeddingManager {
+    + config : RAGConfig
+    + model : SentenceTransformer
+    + index : faiss.IndexFlatIP
+    + chunks : list[Chunk]
+    --
+    + embed_texts(texts) : ndarray
+    + embed_query(query) : ndarray
+    + build_index(chunks) : IndexFlatIP
+    + add_to_index(new_chunks) : void
+    + search(query, top_k) : list[dict]
+    + save(index_path, chunks_path) : void
+    + load(index_path, chunks_path) : bool
+    - _embed_text_for_chunk(chunk) : str
+  }
+
+  class AnswerGenerator {
+    + config : RAGConfig
+    - _ollama_chat_url : str
+    - _ollama_tags_url : str
+    --
+    + generate(query, chunks) : dict
+    + format_context(chunks) : str
+    + format_sources(chunks) : list[dict]
+    - _check_ollama() : bool
+    - _deduplicate_chunks(chunks) : list[dict]
+    - _extract_faq_answer(chunk) : str
+    - _source_fallback(chunks) : str
+    - {static} _get_doc_title(filename) : str
+    - {static} _extract_law_refs(text) : list[str]
+  }
+
+  class Chunk <<dataclass>> {
+    + chunk_id : str
+    + text : str
+    + source_file : str
+    + page_number : int
+    + chunk_index : int
+    + metadata : dict
+  }
+
+  class DocumentPage <<dataclass>> {
+    + text : str
+    + page_number : int
+    + source_file : str
+    + metadata : dict
+  }
+}
+
+' ───────── Training давхарга ─────────
+package "training.scripts" {
+  class SensitiveContentClassifier {
+    + model : sklearn.LogisticRegression
+    + vectorizer : TfidfVectorizer
+    + confidence_threshold : float = 0.5
+    + label_map : dict
+    --
+    + preprocess(text) : str
+    + predict(text) : dict
+    + predict_batch(texts) : list[dict]
+  }
+}
+
+' ───────── API + schemas ─────────
+package "backend.app.schemas" {
+  class ChatRequest <<Pydantic>> {
+    + message : str <<min=1, max=2000>>
+    + category : str <<optional>>
+  }
+
+  class ChatResponse <<Pydantic>> {
+    + answer : str
+    + sources : list[SourceCitation]
+    + safety : SafetyInfo
+    + chat_id : int
+    + response_time_ms : int
+    + model_used : str
+  }
+
+  class SourceCitation <<Pydantic>> {
+    + ref_number : int
+    + source_file : str
+    + document_title : str
+    + page_number : int
+    + snippet : str
+    + relevance_score : float
+    + law_references : list[str]
+  }
+
+  class SafetyInfo <<Pydantic>> {
+    + label : str
+    + confidence : float
+    + is_safe : bool
+  }
+
+  class FeedbackRequest <<Pydantic>> {
+    + chat_id : int
+    + rating : int <<-1 | 1>>
+    + comment : str <<optional>>
+  }
+
+  class IngestResponse <<Pydantic>> {
+    + filename : str
+    + pages : int
+    + chunks : int
+    + total_index_size : int
+    + status : str
+  }
+
+  class HealthResponse <<Pydantic>> {
+    + status : str
+    + index_loaded : bool
+    + total_chunks : int
+    + total_documents : int
+    + classifier_loaded : bool
+  }
+}
+
+' ───────── Холбоосууд ─────────
+ChatService o-- RAGPipeline
+ChatService o-- AnswerGenerator
+ChatService o-- SensitiveContentClassifier
+ChatService ..> ChatRequest : <<consumes>>
+ChatService ..> ChatResponse : <<produces>>
+
+IngestService o-- RAGPipeline
+IngestService ..> IngestResponse : <<produces>>
+
+RAGPipeline o-- EmbeddingManager
+RAGPipeline o-- RAGConfig
+RAGPipeline ..> DocumentPage : <<uses>>
+RAGPipeline ..> Chunk : <<uses>>
+
+EmbeddingManager o-- RAGConfig
+EmbeddingManager *-- "0..*" Chunk
+
+AnswerGenerator o-- RAGConfig
+
+ChatResponse *-- "0..*" SourceCitation
+ChatResponse *-- "1" SafetyInfo
+
+@enduml

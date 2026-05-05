@@ -1,0 +1,74 @@
+---
+title: "Зураг 3.6. RAG боловсруулах үйл ажиллагааны диаграм"
+---
+flowchart TD
+    Start([Хэрэглэгчийн асуулт]) --> V[Pydantic validate<br/>1 ≤ len ≤ 2000]
+    V --> N[_normalize + has_crisis flag]
+
+    N --> Id{_is_identity_question?}
+    Id -->|тийм| IdResp[_IDENTITY_RESPONSE]
+    IdResp --> EndA([end])
+
+    Id -->|үгүй| Cap{_is_capability_question?}
+    Cap -->|тийм| CapResp[_CAPABILITY_RESPONSE]
+    CapResp --> EndA
+
+    Cap -->|үгүй| Greet{normalized in _GREETINGS?}
+    Greet -->|тийм| GrResp[_GREETING_RESPONSE]
+    GrResp --> EndA
+
+    Greet -->|үгүй| Clf[Classifier:<br/>clean + TF-IDF + LR]
+    Clf --> Conf{confidence ≥ 0.5?}
+    Conf -->|үгүй| LblSafe[label = safe]
+    Conf -->|тийм| LblKeep[label = predicted]
+    LblSafe --> Down{label in self_harm OR harassment<br/>AND NOT has_crisis?}
+    LblKeep --> Down
+    Down -->|тийм| Downgrade[downgrade → safe]
+    Down -->|үгүй| Check
+    Downgrade --> Check{is_safe?}
+
+    Check -->|үгүй| Block[SAFETY_RESPONSES + log + return]
+    Block --> EndA
+
+    Check -->|тийм| Vague{vague OR len ≤ 5?}
+    Vague -->|тийм| VR[_CLARIFICATION]
+    VR --> EndA
+
+    Vague -->|үгүй| Q[search_query =<br/>_CATEGORY_CONTEXT + query]
+    Q --> E[embed_query → 384-dim]
+    E --> S[FAISS search<br/>fetch_k = max top_k×4, 8]
+    S --> F[filter ≥ 0.3<br/>FAQ boost +0.12<br/>sort + top-k]
+    F --> Empty{retrieved empty?}
+    Empty -->|тийм| UI[_UNCLEAR_INTENT]
+    UI --> EndA
+
+    Empty -->|үгүй| FS[format_sources<br/>law_refs + doc_title]
+    FS --> Faq{top.is_faq AND<br/>score ≥ 0.55?}
+    Faq -->|тийм| Direct[FAQ fast-path<br/>extract metadata.faq_answer]
+    Direct --> Log
+
+    Faq -->|үгүй| OH[Ollama health<br/>GET /api/tags]
+    OH --> ODown{Ollama down?}
+    ODown -->|тийм| OErr[Ollama error msg]
+    OErr --> EndA
+
+    ODown -->|үгүй| Dedup[_deduplicate_chunks]
+    Dedup --> Ctx[format_context<br/>truncate 250 char]
+    Ctx --> Prompt[Build system + user prompt]
+    Prompt --> POST[POST :11434/api/chat]
+
+    POST --> Result{Ollama result}
+    Result -->|timeout 90s| Fallback[_source_fallback]
+    Result -->|connection error| OErr
+    Result -->|other exception| GenErr[Generic error msg]
+    Result -->|success| Clean[_clean_llm_answer]
+
+    Fallback --> Log
+    GenErr --> EndA
+    Clean --> Leak{looks_like_raw_snippet?}
+    Leak -->|тийм| LeakFix[answer = _UNCLEAR_INTENT]
+    Leak -->|үгүй| Log
+    LeakFix --> Log
+
+    Log[INSERT chat_logs<br/>query · answer · sources<br/>safety · model · ms] --> Render[Frontend: MessageBubble<br/>+ SourcePanel + SafetyWarning]
+    Render --> EndA

@@ -1,0 +1,106 @@
+@startuml 05_sequence_ingest_flow
+title Зураг 3.5. Баримт бичиг оруулах дарааллын диаграм (Админ упload)
+
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+skinparam sequenceMessageAlign center
+
+actor "Админ" as Admin
+participant "AdminPage\n(AdminPage.jsx)" as FE
+participant "api.js\nuploadDocument()" as API
+participant "FastAPI route\nPOST /api/ingest\n(routes.py:61)" as Route
+participant "IngestService\ningest_file()\n(ingest_service.py:19)" as ISvc
+participant "RAGPipeline\ningest_document()\n(pipeline.py:48)" as RAG
+participant "DocumentLoader\nload_document()\n(document_loader.py:94)" as Loader
+participant "Chunker\nchunk_documents()\n(chunker.py:120)" as Chunker
+participant "EmbeddingManager\nadd_to_index()\n(embeddings.py:95)" as Emb
+database "FAISS Index\n+ chunks.pkl" as FAISS
+database "SQLite\ndocuments + chunks" as SQL
+folder "data/raw/" as Raw
+
+Admin -> FE : файл сонгох (.pdf/.txt) + гарчиг бичих
+Admin -> FE : "Оруулах" товч дарах
+FE -> API : uploadDocument(file, title)
+API -> Route : POST /api/ingest\nmultipart/form-data\n(file + title)
+
+== Validation ==
+Route -> Route : suffix in {.pdf, .txt}?
+alt invalid format
+    Route --> API : HTTP 400\n"Unsupported file type"
+    API --> FE : Error: "Алдаа: ..."
+end
+
+== Файлыг disk-д хадгалах ==
+Route -> Raw : shutil.copyfileobj\n→ data/raw/<filename>
+Route -> ISvc : ingest_file(save_path, title)
+
+ISvc -> ISvc : old_count = index.ntotal
+ISvc -> RAG : ingest_document(file_path)
+
+== Текст гаргалт ==
+RAG -> Loader : load_document(file_path)
+alt PDF
+    Loader -> Loader : fitz.open() + page.get_text("text")\nclean_extracted_text()
+else TXT
+    Loader -> Loader : open(utf-8) + read\nclean_extracted_text()
+end
+Loader --> RAG : list[DocumentPage]
+
+== Chunking ==
+RAG -> Chunker : chunk_documents(pages, 500, 50)
+loop page бүрд
+    Chunker -> Chunker : _is_faq_text(page.text)?
+    alt FAQ хэлбэр
+        Chunker -> Chunker : _parse_faq_entries\n→ 1 chunk per Q+A
+        note right
+          metadata.is_faq=True
+          metadata.faq_question=...
+          metadata.faq_answer=...
+        end note
+    else generic
+        Chunker -> Chunker : chunk_text\n(500 char + 50 overlap,\nsentence boundary aware)
+    end
+end
+Chunker --> RAG : list[Chunk]
+
+== Embedding + FAISS ==
+RAG -> Emb : add_to_index(new_chunks)
+Emb -> Emb : _embed_text_for_chunk\n(FAQ → асуулт only)
+Emb -> Emb : model.encode\n(normalize=True, batch=32)
+Emb -> FAISS : index.add(embeddings)
+Emb -> Emb : self.chunks.extend(new_chunks)
+
+RAG -> Emb : save()
+Emb -> FAISS : faiss.write_index\n+ pickle.dump(chunks)
+
+RAG --> ISvc : {file, pages, chunks, total_index_size}
+
+== SQLite метадата бичих ==
+ISvc -> ISvc : new_chunks = manager.chunks[-N:]
+ISvc -> SQL : INSERT OR REPLACE INTO documents\n(title, filename, source_type,\npage_count, chunk_count)
+SQL --> ISvc : doc_id
+
+loop chunk бүрд
+    ISvc -> SQL : INSERT OR REPLACE INTO chunks\n(document_id, chunk_id, chunk_index,\ntext, page_number, char_count, metadata_json)
+end
+
+ISvc --> Route : {file, pages, chunks, total_index_size, title, doc_id}
+Route --> API : IngestResponse JSON\n{filename, pages, chunks, total_index_size}
+API --> FE : success
+FE -> FE : loadData() — refresh document list
+FE --> Admin : "Амжилттай! N хуудас, M хэсэг"
+
+== Алдаа handling ==
+note over ISvc, SQL
+  Бүх алхамд exception гарвал
+  Route доторх try/except нь
+  HTTP 500 буцаана:
+  "Ingestion failed: {error}"
+
+  ⚠ Атомик биш:
+  FAISS index хадгалагдсан боловч
+  SQL INSERT алдаа гарвал зөрчил
+  үүсэх магадлалтай.
+end note
+
+@enduml

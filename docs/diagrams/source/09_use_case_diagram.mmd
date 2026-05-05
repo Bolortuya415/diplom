@@ -1,0 +1,63 @@
+---
+title: "Зураг 3.9. Use case диаграм"
+---
+flowchart LR
+    User(["👤 Энгийн<br/>хэрэглэгч"])
+    Admin(["🛡️ Админ<br/>хэрэглэгч"])
+    System(["⚙️ Систем<br/>(автомат)"])
+
+    subgraph Boundary ["Boloroo чатбот"]
+        UC1((["UC1: Ангилал<br/>сонгох"]))
+        UC2((["UC2: Асуулт<br/>асуух<br/>POST /api/chat"]))
+        UC3((["UC3: Хариулт<br/>авах"]))
+        UC4((["UC4: Эх сурвалж<br/>харах<br/>SourcePanel"]))
+        UC5((["UC5: Санал өгөх<br/>POST /api/feedback"]))
+        UC6((["UC6: Жишээ<br/>асуулт сонгох"]))
+
+        UC7((["UC7: Баримт<br/>байршуулах<br/>POST /api/ingest"]))
+        UC8((["UC8: Баримтын<br/>жагсаалт<br/>GET /api/documents"]))
+        UC9((["UC9: Баримт<br/>устгах<br/>DELETE /api/docs/id"]))
+        UC10((["UC10: Health check<br/>GET /api/health"]))
+        UC11((["UC11: Статистик<br/>GET /api/stats"]))
+
+        UC12((["UC12: Аюулгүй байдал<br/>ангилах<br/>Classifier"]))
+        UC13((["UC13: Shortcut<br/>шалгах<br/>identity/cap/greet"]))
+        UC14((["UC14: Vector<br/>хайлт<br/>FAISS search"]))
+        UC15((["UC15: FAQ fast-path<br/>score ≥ 0.55"]))
+        UC16((["UC16: LLM хариу<br/>үүсгэх<br/>Ollama"]))
+        UC17((["UC17: Лог<br/>хадгалах<br/>INSERT chat_logs"]))
+        UC18((["UC18: Баримт<br/>боловсруулах<br/>load+chunk+embed"]))
+        UC19((["UC19: Мэдлэгийн<br/>сан шинэчлэх<br/>FAISS write"]))
+    end
+
+    User --> UC1
+    User --> UC2
+    User --> UC3
+    User --> UC4
+    User --> UC5
+    User --> UC6
+
+    Admin --> UC7
+    Admin --> UC8
+    Admin --> UC9
+    Admin --> UC10
+    Admin --> UC11
+
+    System --> UC12
+    System --> UC13
+    System --> UC14
+    System --> UC15
+    System --> UC16
+    System --> UC17
+    System --> UC18
+    System --> UC19
+
+    UC2 -.->|include| UC13
+    UC2 -.->|include| UC12
+    UC2 -.->|include| UC14
+    UC2 -.->|include| UC15
+    UC2 -.->|include| UC16
+    UC3 -.->|include| UC17
+    UC7 -.->|include| UC18
+    UC7 -.->|include| UC19
+    UC4 -.->|extend| UC2

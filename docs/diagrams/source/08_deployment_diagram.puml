@@ -1,0 +1,101 @@
+@startuml 08_deployment_diagram
+title Зураг 3.8. Системийн байршуулалтын диаграм
+
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+skinparam linetype polyline
+
+node "Хэрэглэгчийн төхөөрөмж\n(Windows / macOS / Linux)" as UserDevice {
+  artifact "Browser\n(Chrome / Edge / Firefox)" as Browser
+}
+
+node "Локал ноут / сервер\n(localhost)" as Host {
+
+  node "Frontend процесс" as FENode {
+    artifact "Vite dev server (port 5173)\nnode 20+\nfrontend/" as Vite
+    artifact "(Production)\nVite build → dist/\nnginx serve" as Nginx
+  }
+
+  node "Backend процесс\nPython 3.14 venv" as BENode {
+    component "Uvicorn\nbackend.app.main:app\n(port 8000)" as Uvicorn
+    component "FastAPI router\n7 endpoint" as RouteNode
+    component "RAGPipeline\n+ EmbeddingManager\n(memory after init)" as RAGNode
+    component "AnswerGenerator" as GenNode
+    component "SensitiveContent-\nClassifier (memory)" as ClsNode
+  }
+
+  node "Ollama service" as OllamaNode {
+    artifact "Ollama daemon\n(port 11434)\nqwen2.5:7b\n4.7 GB Q4_K_M" as Ollama
+  }
+
+  database "FAISS файлууд\ndata/vectors/" as FaissDB {
+    file "index.faiss\n(5 MB)" as IdxFile
+    file "chunks.pkl\n(3 MB)" as ChkFile
+  }
+
+  database "SQLite файл\ndata/boloroo.db\n(~122 KB, WAL mode)" as SQLDB
+
+  database "ML моделүүд\ntraining/models/" as ModelDB {
+    file "sensitive_classifier.pkl\n(58 KB)" as ClfFile
+    file "tfidf_vectorizer.pkl\n(53 KB)" as TfidfFile
+  }
+
+  database "Эх баримтууд\ndata/raw/\n(~1.8 MB)" as RawDB {
+    file "5 PDF + 7 TXT" as RawFiles
+  }
+
+  artifact ".env\n(локал тохиргоо)" as EnvFile
+}
+
+cloud "Optional: Docker compose stack" as DockerCloud {
+  node "frontend container\nnginx + dist/\nport 80" as FEC
+  node "backend container\nuvicorn\nport 8000" as BEC
+  note right of BEC
+    ⚠ OLLAMA_BASE_URL =
+    http://host.docker.internal:11434
+    + extra_hosts: host-gateway
+    шаардлагатай (docker-compose.yml-д
+    одоогоор тохируулагдаагүй)
+  end note
+}
+
+' ── Тэгш цэгүүд ──
+Browser --> Vite : "HTTP\nhttp://localhost:5173"
+Vite --> Uvicorn : "Vite proxy\n/api → :8000"
+Browser ..> Nginx : "Production\nhttp://localhost"
+Nginx ..> Uvicorn : "nginx /api/ proxy_pass"
+
+Uvicorn --> RouteNode
+RouteNode --> RAGNode
+RouteNode --> GenNode
+RouteNode --> ClsNode
+
+RAGNode --> FaissDB : "startup load\n+ ingest write"
+GenNode --> Ollama : "POST /api/chat\nover loopback"
+ClsNode --> ModelDB : "joblib.load (startup)"
+
+RouteNode --> SQLDB : "WAL mode\nINSERT/SELECT"
+RouteNode --> RawDB : "shutil.copyfileobj\n(admin upload)"
+Uvicorn ..> EnvFile : "load_dotenv()"
+
+Browser ..> FEC : "Production option"
+FEC ..> BEC
+BEC ..> Ollama : "host.docker.internal\n:11434"
+
+note bottom of Host
+  **Шаардлагатай хүчин чадал:**
+  • RAM: ~5–6 GB (Ollama 4.7 GB +
+    sentence-transformer 470 MB +
+    FAISS 5 MB + Backend 200 MB)
+  • Disk: ~6 GB (qwen2.5:7b)
+  • CPU: 4-core x86_64+ (GPU optional)
+end note
+
+note right of UserDevice
+  Хэрэглэгч өөр төхөөрөмжөөр
+  зочилох бол host machine-ийн
+  IP-д CORS_ORIGINS нэмэх
+  шаардлагатай.
+end note
+
+@enduml

@@ -1,0 +1,59 @@
+---
+title: "Зураг 3.8. Системийн байршуулалтын диаграм"
+---
+flowchart TB
+    subgraph UD ["💻 Хэрэглэгчийн төхөөрөмж"]
+        Browser["🌐 Browser<br/>Chrome / Edge / Firefox"]
+    end
+
+    subgraph Host ["🖥️ Локал ноут / сервер (localhost)"]
+        subgraph FEN ["Frontend процесс"]
+            Vite["Vite dev server<br/>port 5173 · node 20+"]
+            Nginx["(Production)<br/>nginx + dist/"]
+        end
+
+        subgraph BEN ["Backend процесс (Python 3.14 venv)"]
+            Uv["Uvicorn<br/>backend.app.main:app<br/>port 8000"]
+            Route["FastAPI router<br/>7 endpoint"]
+            RAGm["RAGPipeline<br/>+ EmbeddingManager<br/>(memory)"]
+            Gen["AnswerGenerator"]
+            Cls["SensitiveContent-<br/>Classifier (memory)"]
+        end
+
+        subgraph OllamaN ["Ollama service"]
+            Ollama["Ollama daemon<br/>port 11434<br/>qwen2.5:7b (4.7 GB)"]
+        end
+
+        FAISSdb[("FAISS файлууд<br/>data/vectors/<br/>index.faiss · chunks.pkl")]
+        SQLdb[("SQLite<br/>data/boloroo.db<br/>WAL mode")]
+        Models[("ML моделүүд<br/>training/models/<br/>*.pkl")]
+        Raw[("Эх баримтууд<br/>data/raw/")]
+        Env["⚙️ .env<br/>локал тохиргоо"]
+    end
+
+    subgraph Docker ["☁️ Optional: Docker compose"]
+        FEC["frontend container<br/>nginx + dist/<br/>port 80"]
+        BEC["backend container<br/>uvicorn<br/>port 8000"]
+    end
+
+    Browser -->|"http://localhost:5173"| Vite
+    Vite -->|"Vite proxy<br/>/api → :8000"| Uv
+    Browser -.->|"production"| Nginx
+    Nginx -.->|"nginx /api/ proxy"| Uv
+
+    Uv --> Route
+    Route --> RAGm
+    Route --> Gen
+    Route --> Cls
+
+    RAGm -->|"startup load + ingest"| FAISSdb
+    Gen -->|"POST /api/chat<br/>loopback"| Ollama
+    Cls -->|"joblib.load (startup)"| Models
+
+    Route -->|"INSERT/SELECT"| SQLdb
+    Route -->|"shutil copy (admin)"| Raw
+    Uv -.->|"load_dotenv()"| Env
+
+    Browser -.-> FEC
+    FEC -.-> BEC
+    BEC -.->|"host.docker.internal:11434"| Ollama

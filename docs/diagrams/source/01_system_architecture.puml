@@ -1,0 +1,111 @@
+@startuml 01_system_architecture
+title Зураг 3.1. Системийн ерөнхий архитектур — Boloroo чатбот
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+skinparam wrapWidth 200
+
+actor "Хэрэглэгч\n(End user)" as User
+actor "Админ\n(Admin)" as Admin
+
+package "Frontend (React + Vite, port 5173)" as FE {
+  component [LandingPage\n(3 ангилал)] as Landing
+  component [ChatPage\n(чат UI)] as ChatUI
+  component [AdminPage\n(upload + статистик)] as AdminUI
+  component [services/api.js\n(fetch wrapper)] as ApiJs
+}
+
+package "Backend (FastAPI, port 8000)" as BE {
+  component [main.py\nLifespan + CORS] as Main
+  component [api/routes.py\n7 endpoint] as Routes
+  component [services/ChatService\n6-step routing] as ChatSvc
+  component [services/IngestService] as IngestSvc
+  component [SensitiveContent-\nClassifier (TF-IDF + LR)] as Clf
+}
+
+package "RAG бүрэлдэхүүн (rag/)" as RAG {
+  component [RAGPipeline\n(facade)] as Pipeline
+  component [DocumentLoader\n(PyMuPDF / TXT)] as Loader
+  component [Chunker\n(FAQ-aware)] as Chunker
+  component [EmbeddingManager\n(MiniLM-L12)] as Emb
+  component [AnswerGenerator\n(Ollama prompt)] as Gen
+}
+
+database "SQLite\n(data/boloroo.db)" as SQL {
+  [documents]
+  [chunks]
+  [chat_logs]
+  [feedback]
+}
+
+database "FAISS Index\n(data/vectors/)" as FAISS {
+  [index.faiss]
+  [chunks.pkl]
+}
+
+folder "Эх баримтууд\n(data/raw/)" as Raw {
+  [5 PDF + 7 TXT]
+}
+
+folder "ML моделүүд\n(training/models/)" as Models {
+  [sensitive_classifier.pkl]
+  [tfidf_vectorizer.pkl]
+}
+
+cloud "Ollama LLM\n(localhost:11434)" as Ollama {
+  [qwen2.5:7b\n(Q4_K_M, 4.7 GB)]
+}
+
+User --> Landing : "ангилал сонгох"
+User --> ChatUI : "асуулт оруулах"
+Admin --> AdminUI : "баримт upload"
+
+Landing --> ChatUI : "category state"
+ChatUI --> ApiJs : "sendChat / submitFeedback"
+AdminUI --> ApiJs : "uploadDocument / getStats"
+ApiJs --> Routes : "HTTP/JSON\n(Vite proxy /api → :8000)"
+
+Routes --> ChatSvc : "POST /api/chat"
+Routes --> IngestSvc : "POST /api/ingest"
+Main --> Routes : "include_router"
+Main --> ChatSvc : "lifespan startup инициализаци"
+Main --> Pipeline : "RAG ачаалах"
+
+ChatSvc --> Clf : "predict(query)"
+ChatSvc --> Pipeline : "search(query)"
+ChatSvc --> Gen : "generate(query, chunks)"
+ChatSvc --> SQL : "INSERT chat_logs"
+
+IngestSvc --> Pipeline : "ingest_document(file)"
+IngestSvc --> SQL : "INSERT documents/chunks"
+
+Pipeline --> Loader : "load_document"
+Loader --> Raw : "уншина"
+Pipeline --> Chunker : "chunk_documents"
+Pipeline --> Emb : "build_index / search"
+Emb --> FAISS : "read/write index + pickle"
+
+Gen --> Ollama : "POST /api/chat\n(qwen2.5:7b)"
+Gen --> Emb : "FAQ fast-path tail"
+
+Clf --> Models : "joblib.load (.pkl)"
+
+note right of ChatSvc
+  6-step routing:
+  1a. Identity shortcut
+  1b. Capability shortcut
+   2. Greeting shortcut
+   3. Classifier predict
+   4. Crisis downgrade
+   5. Vague-query shortcut
+   6. RAG retrieval + LLM
+end note
+
+note right of Gen
+  FAQ fast-path:
+  top.is_faq && score≥0.55
+  → шууд буцаах, LLM-г тойрно
+end note
+
+@enduml

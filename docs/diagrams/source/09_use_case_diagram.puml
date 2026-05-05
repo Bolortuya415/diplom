@@ -1,0 +1,95 @@
+@startuml 09_use_case_diagram
+title Зураг 3.9. Use case диаграм — Boloroo чатбот
+
+skinparam shadowing false
+skinparam defaultFontName "Arial Unicode MS"
+left to right direction
+
+actor "Энгийн хэрэглэгч" as User
+actor "Админ хэрэглэгч" as Admin
+actor "Систем\n(автомат)" as System
+
+rectangle "Boloroo чатбот" as Boundary {
+
+  ' ── Энгийн хэрэглэгчийн use case-ууд ──
+  usecase "UC1: Сэдвийн ангилал сонгох\n(LandingPage)" as UC1
+  usecase "UC2: Асуулт асуух\n(POST /api/chat)" as UC2
+  usecase "UC3: Хариулт авах\n(ChatResponse)" as UC3
+  usecase "UC4: Эх сурвалж харах\n(SourcePanel)" as UC4
+  usecase "UC5: Санал өгөх\n(POST /api/feedback)" as UC5
+  usecase "UC6: Жишээ асуулт сонгох\n(example chip click)" as UC6
+
+  ' ── Админ хэрэглэгчийн use case-ууд ──
+  usecase "UC7: Баримт бичиг байршуулах\n(POST /api/ingest)" as UC7
+  usecase "UC8: Баримт бичгийн жагсаалт\n(GET /api/documents)" as UC8
+  usecase "UC9: Баримт бичиг устгах\n(DELETE /api/documents/{id})\n[backend only — UI байхгүй]" as UC9
+  usecase "UC10: Системийн эрүүл мэнд шалгах\n(GET /api/health)" as UC10
+  usecase "UC11: Хэрэглээний статистик харах\n(GET /api/stats)" as UC11
+
+  ' ── Системийн дотоод use case-ууд ──
+  usecase "UC12: Аюулгүй байдлыг ангилах\n(SensitiveContentClassifier)" as UC12
+  usecase "UC13: Identity / Capability /\nGreeting shortcut шалгах" as UC13
+  usecase "UC14: Vector хайлт хийх\n(FAISS search)" as UC14
+  usecase "UC15: FAQ fast-path шалгах\n(score ≥ 0.55)" as UC15
+  usecase "UC16: LLM-ээр хариулт үүсгэх\n(Ollama qwen2.5:7b)" as UC16
+  usecase "UC17: Чат түүхэнд лог хадгалах\n(INSERT chat_logs)" as UC17
+  usecase "UC18: Баримт боловсруулах\n(load → chunk → embed)" as UC18
+  usecase "UC19: Мэдлэгийн сан шинэчлэх\n(FAISS write_index)" as UC19
+}
+
+' ── Энгийн хэрэглэгчийн холбоосууд ──
+User --> UC1
+User --> UC2
+User --> UC3
+User --> UC4
+User --> UC5
+User --> UC6
+
+' ── Админий холбоосууд ──
+Admin --> UC7
+Admin --> UC8
+Admin --> UC9
+Admin --> UC10
+Admin --> UC11
+
+' ── Системийн дотоод процесс — actor System шууд ажиллуулна ──
+System --> UC12
+System --> UC13
+System --> UC14
+System --> UC15
+System --> UC16
+System --> UC17
+System --> UC18
+System --> UC19
+
+' ── include хамаарлууд ──
+UC2 ..> UC13 : <<include>>
+UC2 ..> UC12 : <<include>>
+UC2 ..> UC14 : <<include>>
+UC2 ..> UC15 : <<include>>
+UC2 ..> UC16 : <<include>>
+UC3 ..> UC17 : <<include>>
+UC7 ..> UC18 : <<include>>
+UC7 ..> UC19 : <<include>>
+
+' ── extend хамаарал ──
+UC2 <.. UC4 : <<extend>>\n(хариулт орохдоо\nsource харагдана)
+
+note right of UC9
+  ⚠️ Backend endpoint бий боловч
+  AdminPage.jsx-д устгах товч
+  одоогоор хэрэгжээгүй.
+end note
+
+note bottom of UC15
+  FAQ fast-path:
+  LLM (UC16) бүрэн алгасагдана.
+end note
+
+note bottom of Boundary
+  **Auth status:** одоогоор бүх endpoint open.
+  Энгийн ↔ Админ хэрэглэгчийн ялгаа нь
+  зөвхөн UI navigation-д суурилна.
+end note
+
+@enduml
