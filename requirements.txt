@@ -7,8 +7,13 @@ pydantic>=2.10.0
 
 # RAG pipeline
 # sentence-transformers pulls in torch; torch>=2.6 is required for Python 3.14 wheels.
+# Used for both BGE-M3 embeddings and BGE-reranker-v2-m3 cross-encoding.
 sentence-transformers>=3.3.0
-faiss-cpu>=1.9.0
+# ChromaDB — embedded vector database with metadata filtering.
+chromadb>=0.5.20
+# Google Gemini API — free-tier LLM for Mongolian generation.
+# Use the new google-genai SDK (the old google-generativeai is deprecated).
+google-genai>=1.0.0
 requests>=2.32.3
 
 # Document processing

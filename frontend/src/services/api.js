@@ -1,13 +1,10 @@
 const API_BASE = '/api';
 
-export async function sendChat(message, category = null) {
-  const payload = { message };
-  if (category) payload.category = category;
-
+export async function sendChat(message) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ message }),
   });
   if (!res.ok) {
     let detail = `Chat failed: ${res.status}`;

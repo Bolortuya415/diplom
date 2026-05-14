@@ -2,15 +2,16 @@
 RAG retrieval pipeline — document ingestion and vector search.
 
 This module handles ONLY the retrieval side:
-    load → chunk → embed → upsert into ChromaDB → search
+    load → chunk → embed → index → search
 
-Answer generation (Gemini LLM) lives in rag/generator.py and is
-orchestrated by the ChatService in the backend.
+Answer generation (LLM) is handled separately by rag/generator.py
+and orchestrated by the ChatService in the backend.
 
 Thesis note:
     Separating retrieval from generation follows the standard RAG
-    architecture. Ingestion can run without an LLM API key, so the
-    corpus can be built ahead of time.
+    architecture. This allows document ingestion to run offline
+    without an LLM API key, and makes each component independently
+    testable.
 """
 
 import sys
@@ -22,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from rag.config import RAGConfig
 from rag.document_loader import load_document
 from rag.chunker import chunk_documents
-from rag.vector_store import VectorStore
+from rag.embeddings import EmbeddingManager
 
 
 class RAGPipeline:
@@ -30,24 +31,30 @@ class RAGPipeline:
 
     def __init__(self, config: Optional[RAGConfig] = None):
         self.config = config or RAGConfig()
-        self.vector_store = VectorStore(self.config)
+        self.embedding_manager = EmbeddingManager(self.config)
         self._initialized = False
 
     def initialize(self) -> bool:
-        """Mark the pipeline ready if Chroma already has indexed chunks."""
-        self._initialized = self.vector_store.load()
-        return self._initialized
+        """Load existing FAISS index from disk if available."""
+        loaded = self.embedding_manager.load()
+        self._initialized = loaded
+        return loaded
 
     @property
     def is_ready(self) -> bool:
-        """A non-empty collection is sufficient — Chroma persists on disk."""
-        return self.vector_store.count > 0
+        """Check if the pipeline has a loaded index."""
+        return self._initialized and self.embedding_manager.index is not None
 
     def ingest_document(self, file_path: str) -> dict:
-        """Ingest a single document: load → chunk → embed → upsert."""
+        """
+        Ingest a single document: load → chunk → embed → index → save.
+        No LLM or OpenAI API required.
+        """
+        # Load
         pages = load_document(file_path)
         print(f"Loaded {len(pages)} pages from {file_path}")
 
+        # Chunk
         chunks = chunk_documents(
             pages,
             chunk_size=self.config.chunk_size,
@@ -55,14 +62,21 @@ class RAGPipeline:
         )
         print(f"Created {len(chunks)} chunks")
 
-        self.vector_store.add_to_index(chunks)
-        self._initialized = True
+        # Add to index
+        if self._initialized:
+            self.embedding_manager.add_to_index(chunks)
+        else:
+            self.embedding_manager.build_index(chunks)
+            self._initialized = True
+
+        # Save
+        self.embedding_manager.save()
 
         return {
             "file": Path(file_path).name,
             "pages": len(pages),
             "chunks": len(chunks),
-            "total_index_size": self.vector_store.count,
+            "total_index_size": self.embedding_manager.index.ntotal,
         }
 
     def ingest_directory(self, dir_path: str) -> list[dict]:
@@ -80,13 +94,12 @@ class RAGPipeline:
 
         return results
 
-    def search(
-        self,
-        query: str,
-        top_k: Optional[int] = None,
-        topic: Optional[str] = None,
-    ) -> list[dict]:
-        """Search for chunks relevant to a query, optionally filtered by topic."""
+    def search(self, query: str, top_k: int = None) -> list[dict]:
+        """
+        Search for chunks relevant to a query.
+
+        Returns list of dicts with: chunk_id, text, source_file, page_number, score, metadata
+        """
         if not self.is_ready:
             return []
-        return self.vector_store.search(query, top_k=top_k, topic=topic)
+        return self.embedding_manager.search(query, top_k=top_k)

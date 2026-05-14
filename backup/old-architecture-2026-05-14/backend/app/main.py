@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.app.core.config import (
     CORS_ORIGINS, DEBUG, HOST, PORT,
-    GEMINI_MODEL, TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, EMBEDDING_MODEL,
+    LLM_MODEL, TOP_K, CHUNK_SIZE, CHUNK_OVERLAP, EMBEDDING_MODEL,
 )
 from backend.app.db.database import init_db
 from backend.app.api import routes
@@ -36,12 +36,11 @@ async def lifespan(app: FastAPI):
     # Initialize database
     init_db()
 
-    # Initialize shared RAG pipeline — values forwarded from backend config
-    # so a single .env controls both layers.
+    # Initialize shared RAG pipeline — config values come from .env
     from rag.pipeline import RAGPipeline
     from rag.config import RAGConfig
     rag = RAGPipeline(config=RAGConfig(
-        llm_model=GEMINI_MODEL,
+        llm_model=LLM_MODEL,
         top_k=TOP_K,
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,

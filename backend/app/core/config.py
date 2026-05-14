@@ -26,17 +26,29 @@ PORT = int(os.getenv("PORT", "8000"))
 DEBUG = os.getenv("DEBUG", "true").lower() == "true"
 
 # CORS
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+).split(",")
 
-# Ollama
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+# ── LLM: Google Gemini ─────────────────────────────────────────────────
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.15"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "400"))
 
-# RAG — CPU-friendly defaults (works on Windows laptops with Ollama)
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:7b")
-TOP_K = int(os.getenv("TOP_K", "2"))
+# ── Vector store: ChromaDB ────────────────────────────────────────────
+CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "boloroo_corpus")
+CHROMA_PERSIST_DIR = VECTOR_DIR / "chroma"
+
+# ── Embeddings + reranker ─────────────────────────────────────────────
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+USE_RERANKER = os.getenv("USE_RERANKER", "true").lower() in {"1", "true", "yes", "on"}
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+
+# ── RAG retrieval ─────────────────────────────────────────────────────
+TOP_K = int(os.getenv("TOP_K", "4"))
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))
 
-# Classifier
+# ── Classifier ────────────────────────────────────────────────────────
 SAFETY_CONFIDENCE_THRESHOLD = float(os.getenv("SAFETY_CONFIDENCE_THRESHOLD", "0.5"))

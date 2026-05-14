@@ -1,23 +1,21 @@
 """
-Chat service — orchestrates retrieval + LLM generation.
-
-The previous trained safety classifier was removed: it produced too many
-false positives on legitimate help-seeking questions (e.g. "if I'm not
-hired because of my gender"). The LLM (Gemini) now decides relevance
-and safety as part of answer generation, guided by the system prompt.
+Chat service — orchestrates classifier + retrieval + generation.
 
 Routing priority (fastest path first):
     1a. Identity shortcut      → "чи хэн бэ" → direct self-introduction
     1b. Capability shortcut    → "чи юу хийж чадах вэ" → topic list reply
-    2.  Greeting shortcut      → direct Mongolian greeting, skip the LLM
-    3.  Crisis indicator       → hard route to hotline response. The only
-                                 deterministic safety block — phrases like
-                                 "амиа", "өөрийгөө хорлох" demand an
-                                 immediate canned hotline message, not a
-                                 chat dialog.
-    4.  Vague query shortcut   → clarification request, skip the LLM
-    5.  RAG retrieval + LLM    → the LLM judges relevance, refuses
-                                 hateful content, or answers from sources.
+        (both bypass classifier and retrieval so benign help phrases are
+         never treated as crisis)
+    2.  Greeting shortcut      → direct Mongolian greeting, skip Ollama
+    3.  Safety classifier      → block if unsafe; self_harm/harassment are
+                                 downgraded to "safe" when the text contains
+                                 no real crisis indicator
+    4.  Vague query shortcut   → clarification request, skip Ollama
+    5.  RAG retrieval + Ollama → only for real topical questions
+    6.  Unclear-intent fallback → polite Mongolian "please rephrase" message
+
+Ollama is only called when there are retrieved chunks AND the query is
+a substantive topical question. This minimizes CPU pressure on the Mac.
 """
 
 import json
@@ -30,12 +28,13 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
+from backend.app.core.config import (
+    MODEL_DIR, SAFETY_CONFIDENCE_THRESHOLD,
+)
 from backend.app.db.database import get_db
 from rag.pipeline import RAGPipeline
 from rag.generator import AnswerGenerator
-# Only SAFETY_RESPONSES is imported now — used for the crisis-indicator
-# hotline reply. The trained classifier itself is no longer in the flow.
-from training.scripts.inference import SAFETY_RESPONSES
+from training.scripts.inference import SensitiveContentClassifier, SAFETY_RESPONSES
 
 logger = logging.getLogger("boloroo.chat")
 if not logger.handlers:
@@ -58,7 +57,7 @@ _GREETINGS: frozenset[str] = frozenset({
 })
 
 # Vague queries with no clear topic — return a clarification question instead
-# of wasting an LLM call that would produce a useless answer.
+# of wasting an Ollama call that would produce a useless answer.
 # Bare "тусламж / туслаач / тусла" stay in this list so they get clarification,
 # NOT crisis routing. Real crisis input is detected via _CRISIS_INDICATORS_RE.
 _VAGUE_QUERIES: frozenset[str] = frozenset({
@@ -77,6 +76,22 @@ _CLARIFICATION_RESPONSE = (
     "Жишээ нь: хүйсийн тэгш байдал, хүүхэд хамгаалал, "
     "ялгаварлан гадуурхалт, дарамт, хүчирхийлэл зэрэг сэдвийн талаар асуух боломжтой."
 )
+
+# Category-specific context prefixes added to queries for better retrieval
+_CATEGORY_CONTEXT: dict[str, str] = {
+    "gender_equality": (
+        "Хүйсийн тэгш эрх, жендэрийн бодлого, эмэгтэйчүүдийн эрх, "
+        "бэлгийн дарамт, гэр бүлийн харилцаанд тэгш байдал: "
+    ),
+    "discrimination": (
+        "Ялгаварлан гадуурхалт, тэгш бус хандлага, үзэн ядалт, "
+        "сургуулийн дарамт, хуулийн хамгаалалт: "
+    ),
+    "disability": (
+        "Хөгжлийн бэрхшээлтэй иргэн, тэгш хүртээмж, боловсролын эрх, "
+        "ажил эрхлэлт, нийгмийн хамгаалал: "
+    ),
+}
 
 # Direct capability reply — returned when the user asks what the chatbot can do.
 _CAPABILITY_RESPONSE = (
@@ -171,6 +186,10 @@ _CRISIS_INDICATORS_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# Labels we are willing to downgrade to "safe" if no real crisis indicator
+# is present. We never downgrade hate_speech or discrimination — those
+# labels are triggered by the content itself, not by crisis context.
+_DOWNGRADEABLE_LABELS = {"self_harm", "harassment"}
 
 
 def _normalize(text: str) -> str:
@@ -221,11 +240,12 @@ _RAW_SNIPPET_LEAK_RE = re.compile(
 
 
 class ChatService:
-    """Handles the full chat flow: crisis check → route → retrieve → generate."""
+    """Handles the full chat flow: safety check → route → retrieve → generate."""
 
     def __init__(self):
         self.rag: Optional[RAGPipeline] = None
         self.generator: Optional[AnswerGenerator] = None
+        self.classifier: Optional[SensitiveContentClassifier] = None
 
     @staticmethod
     def _looks_like_raw_snippet(answer: str) -> bool:
@@ -235,15 +255,25 @@ class ChatService:
         return bool(_RAW_SNIPPET_LEAK_RE.search(answer))
 
     def initialize_with_rag(self, rag: RAGPipeline):
-        """Attach the shared RAG pipeline and create the LLM generator."""
+        """Attach a shared RAG pipeline and create the LLM generator + classifier."""
         self.rag = rag
         self.generator = AnswerGenerator(config=rag.config)
+
+        try:
+            self.classifier = SensitiveContentClassifier(
+                model_dir=str(MODEL_DIR),
+                confidence_threshold=SAFETY_CONFIDENCE_THRESHOLD,
+            )
+            print("Sensitive content classifier loaded.")
+        except FileNotFoundError as e:
+            print(f"Warning: Classifier not loaded — {e}")
+            self.classifier = None
 
     def process_query(self, query: str, category: Optional[str] = None) -> dict:
         """
         Process a user query through the full pipeline.
 
-        The LLM is only called for substantive topical questions with
+        Ollama is only called for substantive topical questions with
         retrieved context. All other paths return immediately.
         """
         start_time = time.time()
@@ -293,7 +323,7 @@ class ChatService:
                 start_time=start_time,
             )
 
-        # ── Step 2: Greeting shortcut — skip the LLM ─────────────────────
+        # ── Step 2: Greeting shortcut — skip Ollama ──────────────────────
         if normalized in _GREETINGS:
             _log_route("greeting", query)
             return self._build_response(
@@ -306,36 +336,46 @@ class ChatService:
                 start_time=start_time,
             )
 
-        # ── Step 3: Crisis-indicator hard block ──────────────────────────
-        # Only fires on real immediate-danger phrases (амиа / өөрийгөө
-        # хорлох / etc.). Returns the canned self_harm hotline message
-        # rather than letting the LLM engage in dialogue with someone
-        # who may be in crisis. This is the ONLY deterministic safety
-        # block; everything else is judged by the LLM in step 5.
-        safety_result = dict(safe_result)
-        if has_crisis:
-            _log_route("crisis:self_harm", query)
-            safety_response = SAFETY_RESPONSES.get("self_harm", {}).get(
+        # ── Step 3: Safety classification ────────────────────────────────
+        if self.classifier:
+            safety_result = self.classifier.predict(query)
+        else:
+            safety_result = dict(safe_result)
+
+        # ── Step 4: Downgrade false-positive crisis flags ────────────────
+        # If the classifier flagged self_harm / harassment but the text
+        # contains no real crisis indicator, treat the query as safe.
+        # This prevents general help phrases ("туслаач", "тусалж чадах уу")
+        # from triggering the emergency response.
+        if (not safety_result["is_safe"]
+                and safety_result["label"] in _DOWNGRADEABLE_LABELS
+                and not has_crisis):
+            safety_result = {
+                "label": "safe",
+                "label_id": 0,
+                "confidence": safety_result.get("confidence", 1.0),
+                "is_safe": True,
+                "all_scores": safety_result.get("all_scores", {}),
+            }
+
+        # ── Step 5: Block truly unsafe input ─────────────────────────────
+        if not safety_result["is_safe"]:
+            label = safety_result["label"]
+            _log_route(f"crisis:{label}", query)
+            safety_response = SAFETY_RESPONSES.get(label, {}).get(
                 "mn", "Уучлаарай, энэ асуултад хариулах боломжгүй байна."
             )
-            safety_result = {
-                "label": "self_harm",
-                "label_id": 1,
-                "confidence": 1.0,
-                "is_safe": False,
-                "all_scores": {},
-            }
             return self._build_response(
                 query=query,
                 answer=safety_response,
                 sources=[],
                 safety_result=safety_result,
-                model_used="crisis_hotline",
+                model_used="classifier",
                 tokens_used=0,
                 start_time=start_time,
             )
 
-        # ── Step 6: Vague query shortcut — skip the LLM ──────────────────
+        # ── Step 6: Vague query shortcut — skip Ollama ───────────────────
         # Bare "туслаач", "яах вэ", "хаана хандах вэ" etc. → clarification.
         # Very short queries also fall through here, but capability questions
         # were already handled in Step 1 so they don't hit this branch.
@@ -364,8 +404,11 @@ class ChatService:
                 start_time=start_time,
             )
 
-        # Single shared corpus — retrieve directly from the user's query.
-        retrieved = self.rag.search(query)
+        # Prepend category context to the query for better retrieval relevance
+        search_query = query
+        if category and category in _CATEGORY_CONTEXT:
+            search_query = _CATEGORY_CONTEXT[category] + query
+        retrieved = self.rag.search(search_query)
 
         if not retrieved:
             _log_route("fallback:no_retrieval", query)
@@ -384,7 +427,7 @@ class ChatService:
         if route_label == "faq_direct":
             _log_route("faq", query)
         elif route_label == "source_fallback":
-            _log_route("fallback:llm_error", query)
+            _log_route("fallback:ollama_timeout", query)
         else:
             _log_route("retrieval", query)
 

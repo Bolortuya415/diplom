@@ -121,22 +121,21 @@ async def health_check():
     )
     total_chunks = 0
     if index_loaded:
-        total_chunks = chat_service.rag.vector_store.count
+        total_chunks = chat_service.rag.embedding_manager.index.ntotal
 
     with get_db() as conn:
         doc_count = conn.execute(
             "SELECT COUNT(*) FROM documents WHERE status='active'"
         ).fetchone()[0]
 
-    # `classifier_loaded` is kept in the response schema for back-compat
-    # but always False — the trained classifier was removed and the LLM
-    # now handles relevance and safety decisions.
+    classifier_loaded = chat_service is not None and chat_service.classifier is not None
+
     return HealthResponse(
         status="healthy",
         index_loaded=index_loaded,
         total_chunks=total_chunks,
         total_documents=doc_count,
-        classifier_loaded=False,
+        classifier_loaded=classifier_loaded,
     )
 
 

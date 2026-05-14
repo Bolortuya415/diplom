@@ -27,12 +27,18 @@ class IngestService:
         path = Path(file_path)
         title = title or path.stem
 
-        # Ingest via RAG pipeline (handles load + chunk + embed + upsert)
+        # Capture chunk count before ingestion to compute new chunks added
+        old_count = (
+            self.rag.embedding_manager.index.ntotal
+            if self.rag.embedding_manager.index is not None else 0
+        )
+
+        # Ingest via RAG pipeline (handles load + chunk + embed + index)
         result = self.rag.ingest_document(file_path)
 
-        # Get the newly added chunks from the vector store (in-session list)
+        # Get the newly added chunks from the embedding manager
         new_chunk_count = result["chunks"]
-        new_chunks = self.rag.vector_store.chunks[-new_chunk_count:]
+        new_chunks = self.rag.embedding_manager.chunks[-new_chunk_count:]
 
         # Save document metadata to DB
         with get_db() as conn:

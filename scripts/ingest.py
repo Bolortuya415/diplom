@@ -1,8 +1,9 @@
 """
 Document ingestion script.
 
-Loads documents, chunks text, generates embeddings, and stores in FAISS.
-Does NOT require OpenAI API key — only uses local sentence-transformers.
+Loads documents, chunks text, generates BGE-M3 embeddings, and stores
+them in ChromaDB. Does NOT require any LLM API key — embeddings run
+locally via sentence-transformers.
 
 Usage:
     python scripts/ingest.py
@@ -23,10 +24,10 @@ from backend.app.db.database import init_db
 def main():
     init_db()
 
-    # RAGConfig now resolves vector paths to the project root automatically,
-    # so this script works regardless of the current working directory.
+    # RAGConfig resolves Chroma's persist directory under the project
+    # root, so this script works regardless of the current working dir.
     config = RAGConfig()
-    pipeline = RAGPipeline(config=config)  # No OpenAI / no API key — local Ollama only
+    pipeline = RAGPipeline(config=config)  # No LLM API key needed for ingestion
     pipeline.initialize()
 
     if len(sys.argv) > 1:
@@ -50,7 +51,7 @@ def main():
             else:
                 print(f"  OK: {r['file']} — {r['pages']} pages, {r['chunks']} chunks")
 
-        print(f"\nTotal index size: {pipeline.embedding_manager.index.ntotal} vectors")
+        print(f"\nTotal index size: {pipeline.vector_store.count} vectors")
 
 
 if __name__ == "__main__":
