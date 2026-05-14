@@ -1,21 +1,13 @@
 import React, { useState } from 'react'
 import LandingPage from './pages/LandingPage'
-import ChatPage from './pages/ChatPage'
 import AdminPage from './pages/AdminPage'
+import ChatWidget from './components/ChatWidget'
 
 export default function App() {
   const [page, setPage] = useState('landing')
-  const [category, setCategory] = useState(null)
+  const [chatOpen, setChatOpen] = useState(false)
 
-  const handleSelectCategory = (catId) => {
-    setCategory(catId)
-    setPage('chat')
-  }
-
-  const handleBackToLanding = () => {
-    setCategory(null)
-    setPage('landing')
-  }
+  const goLanding = () => setPage('landing')
 
   return (
     <div className="app">
@@ -26,7 +18,7 @@ export default function App() {
               className="brand-mark"
               aria-hidden="true"
               style={{ cursor: 'pointer' }}
-              onClick={handleBackToLanding}
+              onClick={goLanding}
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
                 <path
@@ -42,7 +34,7 @@ export default function App() {
               <h1
                 className="app-title"
                 style={{ cursor: 'pointer' }}
-                onClick={handleBackToLanding}
+                onClick={goLanding}
               >
                 Тэгшбот
               </h1>
@@ -55,8 +47,8 @@ export default function App() {
 
           <nav className="app-nav" aria-label="Үндсэн цэс">
             <button
-              className={`nav-btn ${page === 'landing' || page === 'chat' ? 'active' : ''}`}
-              onClick={handleBackToLanding}
+              className={`nav-btn ${page === 'landing' ? 'active' : ''}`}
+              onClick={goLanding}
             >
               Нүүр
             </button>
@@ -72,13 +64,12 @@ export default function App() {
 
       <main className="app-main">
         {page === 'landing' && (
-          <LandingPage onSelectCategory={handleSelectCategory} />
-        )}
-        {page === 'chat' && (
-          <ChatPage category={category} onBack={handleBackToLanding} />
+          <LandingPage onOpenChat={() => setChatOpen(true)} />
         )}
         {page === 'admin' && <AdminPage />}
       </main>
+
+      <ChatWidget open={chatOpen} setOpen={setChatOpen} />
     </div>
   )
 }

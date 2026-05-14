@@ -118,7 +118,7 @@ def evaluate_retrieval(pipeline: RAGPipeline, questions: list[dict], k_values: l
         keywords = q["relevant_keywords"]
 
         for k in k_values:
-            retrieved = pipeline.embedding_manager.search(query, top_k=k)
+            retrieved = pipeline.search(query, top_k=k)
 
             if not retrieved:
                 results[k]["precision"].append(0.0)

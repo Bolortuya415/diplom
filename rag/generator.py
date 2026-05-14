@@ -1,29 +1,42 @@
 # -*- coding: utf-8 -*-
 """
-Answer generation using Ollama local LLM with retrieved context.
+Answer generation using the Google Gemini API with retrieved context.
 
-Optimized for Intel i7 MacBook (16 GB RAM, no GPU):
-    - Timeout 90s (not 300s) — prevents system freeze
-    - Chunks truncated to 250 chars — keeps prompt short
-    - Deduplication — removes near-duplicate retrieved chunks
-    - Source fallback — returns top chunk on timeout instead of empty error
-    - max_tokens=250 — 2-4 sentences; much faster on CPU
+Free tier:
+    Gemini 2.0 Flash (the default model) ships a generous free quota on
+    Google AI Studio — fine for a thesis demo. No card on file required.
+    Get a key at https://aistudio.google.com/app/apikey
 
-FAQ fast-path:
-    When the top retrieved chunk is an FAQ entry with score ≥
-    _FAQ_DIRECT_THRESHOLD the pre-written Хариулт is returned directly,
-    bypassing Ollama entirely. This gives a faster, cleaner answer and
-    avoids the LLM rephrasing a perfectly good one-sentence FAQ reply
-    into a vague multi-sentence paraphrase.
+Preserved from the previous Ollama-based generator:
+    - Mongolian post-processing: strips leaked citation headers
+      ('[1] file.pdf (х.3)') the model sometimes echoes from the context.
+    - Mongolian doc titles + law-article reference extraction for the
+      source citation panel.
+
+What changed:
+    - Ollama HTTP call → Gemini SDK call.
+    - max_tokens raised (CPU constraint gone) to allow 2–5 sentence answers.
+    - Lazy model init so the backend boots without a key; generate()
+      returns a clear Mongolian message if the key is missing.
+    - FAQ fast-path removed: BGE-M3 cosine similarity alone can't
+      distinguish a same-topic FAQ from the question-specific one, so
+      the path could short-circuit to a misleading answer. The LLM now
+      synthesises every reply from the full retrieved context.
 """
 
-import json
+import os
 import re
+import time
 from typing import Optional
 
-import requests
-
 from rag.config import RAGConfig
+
+# Number of retries on transient Gemini errors (503 / 504 / brief 5xx).
+# Free tier returns 503s sporadically; one or two retries with short
+# backoff masks them without blowing the request latency budget.
+_GEMINI_TRANSIENT_RETRIES = 2
+_GEMINI_RETRY_BACKOFF_S = 0.8
+
 
 # Matches citation headers the LLM may echo from the context:
 #   "[1] filename.pdf (х.3)\n"
@@ -41,105 +54,84 @@ _SOURCE_HEADER_RE = re.compile(
 
 
 def _clean_llm_answer(answer: str) -> str:
-    """
-    Strip leaked citation headers and source leaders from Ollama output.
-
-    The LLM occasionally echoes the context's "[1] filename.pdf (х.3)\\n"
-    header at the start of its answer. Those raw snippets are not a
-    natural Mongolian reply, so we peel them off while keeping the
-    inline "[1]" citation markers inside the body of the answer.
-    """
+    """Strip leaked citation headers / source leaders from the model output."""
     if not answer:
         return ""
     text = answer.strip()
-
-    # Iteratively strip any sequence of leaked headers at the very start
     for _ in range(4):
         new = _CITATION_HEADER_RE.sub("", text, count=1).lstrip()
         new = _SOURCE_HEADER_RE.sub("", new, count=1).lstrip()
         if new == text:
             break
         text = new
-
     return text.strip()
 
-# Score threshold above which a strong FAQ match skips the LLM entirely.
-# Tune upward if too many non-FAQ queries get the fast-path by mistake.
-_FAQ_DIRECT_THRESHOLD = 0.55
 
-# Max chars per chunk sent to LLM — longer than this adds latency with no quality gain
-_CONTEXT_CHUNK_MAX_CHARS = 250
+# Max chars per chunk sent to the LLM — keeps prompts small and focused.
+_CONTEXT_CHUNK_MAX_CHARS = 600
 
 
 class AnswerGenerator:
-    """Generates answers using a local Ollama LLM with RAG context."""
+    """Generates Mongolian answers using Gemini with retrieved context."""
 
     def __init__(self, config: Optional[RAGConfig] = None):
         self.config = config or RAGConfig()
-        # Resolve Ollama endpoints from config so OLLAMA_BASE_URL in .env takes effect
-        base = self.config.ollama_base_url.rstrip("/")
-        self._ollama_chat_url = f"{base}/api/chat"
-        self._ollama_tags_url = f"{base}/api/tags"
+        self._client = None  # lazy-initialised genai.Client
 
-    def _check_ollama(self) -> bool:
-        """Return True if Ollama is reachable."""
-        try:
-            resp = requests.get(self._ollama_tags_url, timeout=3)
-            return resp.status_code == 200
-        except requests.exceptions.ConnectionError:
-            return False
+    # ── Lazy Gemini client ───────────────────────────────────────────
+
+    def _get_client(self):
+        """Return a configured Gemini client, or None if no API key is set."""
+        if self._client is not None:
+            return self._client
+
+        api_key = self.config.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            return None
+
+        from google import genai
+
+        self._client = genai.Client(api_key=api_key)
+        return self._client
+
+    # ── Chunk formatting ─────────────────────────────────────────────
 
     def _deduplicate_chunks(self, chunks: list[dict]) -> list[dict]:
-        """
-        Remove near-duplicate chunks to avoid sending redundant context.
-
-        Two chunks are considered duplicates if one chunk's leading text
-        appears inside another chunk's text (overlap > 60 chars).
-        """
+        """Drop near-duplicate chunks (one's prefix contained in another)."""
         if len(chunks) <= 1:
             return chunks
 
-        seen_prefixes: list[str] = []
+        seen_texts: list[str] = []
         unique: list[dict] = []
-
         for chunk in chunks:
             text = chunk.get("text", "")
             prefix = text[:80].strip()
-            is_duplicate = any(
-                prefix in seen or seen[:80] in text
-                for seen in seen_prefixes
+            duplicate = any(
+                prefix and (prefix in seen or seen[:80] in text)
+                for seen in seen_texts
             )
-            if not is_duplicate:
+            if not duplicate:
                 unique.append(chunk)
-                seen_prefixes.append(text)
-
+                seen_texts.append(text)
         return unique
 
     def format_context(self, retrieved_chunks: list[dict]) -> str:
-        """
-        Format retrieved chunks into a numbered context string.
-
-        Each chunk is truncated to _CONTEXT_CHUNK_MAX_CHARS to keep the
-        prompt short on CPU hardware. Reference numbers allow inline citations.
-        """
         if not retrieved_chunks:
             return "Эх сурвалж олдсонгүй."
 
         chunks = self._deduplicate_chunks(retrieved_chunks)
-        context_parts = []
-
+        parts = []
         for i, chunk in enumerate(chunks, 1):
             source = chunk["source_file"]
             page = chunk.get("page_number", "?")
             text = chunk["text"]
-            # Truncate to keep prompt short — preserves the most relevant opening
             if len(text) > _CONTEXT_CHUNK_MAX_CHARS:
                 text = text[:_CONTEXT_CHUNK_MAX_CHARS].rsplit(" ", 1)[0] + "…"
-            context_parts.append(f"[{i}] {source} (х.{page})\n{text}")
+            parts.append(f"[{i}] {source} (х.{page})\n{text}")
+        return "\n\n".join(parts)
 
-        return "\n\n".join(context_parts)
+    # ── Source citation panel ────────────────────────────────────────
 
-    # Human-readable document titles keyed by filename (case-insensitive)
     _DOC_TITLES = {
         "faq.txt": "Нийтлэг мэдээлэл (FAQ)",
         "faq_gender_equality.txt": "Хүйсийн тэгш эрх (FAQ)",
@@ -155,7 +147,6 @@ class AnswerGenerator:
         "хөгжлийн бэрхшээлтэй хүний эрхийн тухай.pdf": "Хөгжлийн бэрхшээлтэй хүний эрхийн тухай хууль",
     }
 
-    # Patterns to extract law article references from Mongolian text
     _LAW_REF_RE = re.compile(
         r"("
         r"(?:хуулийн\s+)?(?:\d+(?:\.\d+)*|[IVXLC]+)\s*(?:дугаар|дэх|дахь|р|н)\s*зүйл[ийн]*(?:\s+\d+\s*дахь\s+хэсэг[т]?)?"
@@ -167,32 +158,26 @@ class AnswerGenerator:
 
     @classmethod
     def _get_doc_title(cls, source_file: str) -> str:
-        """Return a human-readable document title from a filename."""
         key = source_file.lower().strip()
-        # Exact match
         if key in cls._DOC_TITLES:
             return cls._DOC_TITLES[key]
-        # Partial match (strip path)
         basename = key.split("/")[-1].split("\\")[-1]
         if basename in cls._DOC_TITLES:
             return cls._DOC_TITLES[basename]
-        # Strip extension and return cleaned name
         name = re.sub(r"\.(pdf|txt|docx?)$", "", basename, flags=re.IGNORECASE)
         return name.capitalize() if name else source_file
 
     @classmethod
     def _extract_law_refs(cls, text: str) -> list[str]:
-        """Extract law article references from text (e.g. '14-р зүйл', '10.1 зүйл')."""
         matches = cls._LAW_REF_RE.findall(text)
         seen: list[str] = []
         for m in matches:
             cleaned = re.sub(r"\s+", " ", m).strip()
             if cleaned and cleaned not in seen:
                 seen.append(cleaned)
-        return seen[:3]  # at most 3 refs per source
+        return seen[:3]
 
     def format_sources(self, retrieved_chunks: list[dict]) -> list[dict]:
-        """Format source citations for the frontend."""
         sources = []
         for i, chunk in enumerate(retrieved_chunks, 1):
             raw_score = chunk.get("score", 0.0)
@@ -200,10 +185,7 @@ class AnswerGenerator:
                 relevance_score = round(max(0.0, min(1.0, float(raw_score))), 4)
             except (TypeError, ValueError):
                 relevance_score = 0.0
-
             text = chunk.get("text", "")
-            law_refs = self._extract_law_refs(text)
-
             sources.append({
                 "ref_number": i,
                 "source_file": chunk["source_file"],
@@ -211,43 +193,11 @@ class AnswerGenerator:
                 "page_number": chunk.get("page_number"),
                 "snippet": text[:200] + "…" if len(text) > 200 else text,
                 "relevance_score": relevance_score,
-                "law_references": law_refs,
+                "law_references": self._extract_law_refs(text),
             })
         return sources
 
-    def _extract_faq_answer(self, chunk: dict) -> Optional[str]:
-        """
-        Return the clean Хариулт text from an FAQ chunk, or None.
-
-        Tries metadata first (set at chunking time), then falls back to
-        parsing the chunk text with a regex.
-        """
-        meta = chunk.get("metadata") or {}
-        if meta.get("faq_answer"):
-            return meta["faq_answer"].strip()
-        # Fallback: parse from stored text
-        match = re.search(r"Хариулт\s*:\s*(.+?)(?:\n|$)", chunk.get("text", ""), re.DOTALL)
-        if match:
-            return re.sub(r"\s+", " ", match.group(1)).strip()
-        return None
-
-    def _source_fallback(self, retrieved_chunks: list[dict]) -> str:
-        """
-        Build a minimal, natural-sounding message when Ollama times out.
-
-        We deliberately do NOT dump the raw retrieved chunk text into the
-        final answer — that reads as broken Mongolian. Instead we return a
-        short polite Mongolian message and let the UI show the retrieved
-        chunks separately via the `sources` panel.
-        """
-        if not retrieved_chunks:
-            return "Уучлаарай, хангалттай мэдээлэл олдсонгүй."
-
-        return (
-            "Одоогоор хариулт үүсгэхэд хугацаа хэтэрлээ. "
-            "Холбогдох эх сурвалжуудыг доор харуулав — "
-            "та асуултаа арай товчоор дахин бичиж үзнэ үү."
-        )
+    # ── Main entry point ─────────────────────────────────────────────
 
     def generate(
         self,
@@ -255,55 +205,33 @@ class AnswerGenerator:
         retrieved_chunks: list[dict],
         safety_label: str = "safe",
     ) -> dict:
-        """
-        Generate an answer using Ollama with retrieved context.
-
-        Args:
-            query: User's question
-            retrieved_chunks: List of retrieved chunk dicts from EmbeddingManager.search()
-            safety_label: Output from the sensitive content classifier
-
-        Returns:
-            dict with: answer, sources, model_used, tokens_used
-        """
+        """Return a dict with: answer, sources, model_used, tokens_used."""
         sources = self.format_sources(retrieved_chunks)
 
-        # ── FAQ fast-path: strong match → return stored answer directly ──────
-        # Bypasses Ollama so the answer is cleaner, faster, and exactly what
-        # the FAQ author wrote rather than a hallucination-prone paraphrase.
-        if retrieved_chunks:
-            top = retrieved_chunks[0]
-            top_meta = top.get("metadata") or {}
-            if top_meta.get("is_faq") and top.get("score", 0.0) >= _FAQ_DIRECT_THRESHOLD:
-                faq_answer = self._extract_faq_answer(top)
-                if faq_answer:
-                    return {
-                        "answer": faq_answer,
-                        "sources": sources,
-                        "model_used": "faq_direct",
-                        "tokens_used": 0,
-                        "context_chunks_used": 1,
-                    }
+        # The previous FAQ fast-path (returning the top FAQ's stored answer
+        # verbatim when its embedding score cleared a threshold) is removed:
+        # BGE-M3 cosine alone can't distinguish a same-topic FAQ from the
+        # specific-question FAQ, so the path would short-circuit to the
+        # wrong stored answer. The LLM gets all retrieved chunks and
+        # synthesises a faithful, question-specific reply instead.
 
-        if not self._check_ollama():
+        client = self._get_client()
+        if client is None:
             return {
                 "answer": (
-                    "Уучлаарай, Ollama сервер ажиллахгүй байна. "
-                    "Терминалд `ollama serve` гэж ажиллуулна уу."
+                    "Gemini API түлхүүр тохируулагдаагүй байна. "
+                    ".env файлд GEMINI_API_KEY-г оруулаад серверийг "
+                    "дахин ажиллуулна уу."
                 ),
                 "sources": sources,
                 "model_used": self.config.llm_model,
                 "tokens_used": 0,
                 "context_chunks_used": len(retrieved_chunks),
-                "error": "Ollama not running",
+                "error": "Missing GEMINI_API_KEY",
             }
 
         context = self.format_context(retrieved_chunks)
 
-        system_message = self.config.system_prompt
-
-        # Use a tighter, FAQ-aware prompt when the top chunk is an FAQ entry
-        # (below the direct threshold but still FAQ-sourced).
         top_is_faq = (
             retrieved_chunks
             and (retrieved_chunks[0].get("metadata") or {}).get("is_faq")
@@ -313,53 +241,79 @@ class AnswerGenerator:
                 f"[Асуулт]\n{query}\n\n"
                 f"[FAQ Хариулт]\n{context}\n\n"
                 "[Даалгавар]\n"
-                "FAQ-ийн хариултад тулгуурлан Монгол хэлээр цэвэр, дүрмийн алдаагүй "
-                "бүтэн өгүүлбэрээр хариул. Файлын нэр, хуудасны дугаар, "
-                "'Эх сурвалж:' гэх мэт тэмдэглэгээг хариултын эхэнд бүү бич. "
-                "Хариултын төгсгөлд ашигласан эх сурвалжийг зөвхөн [1] гэсэн дугаараар дурд."
+                "FAQ-ийн хариултад тулгуурлан Монгол хэлээр цэвэр, дүрмийн "
+                "алдаагүй бүтэн өгүүлбэрээр хариул. Файлын нэр, хуудасны "
+                "дугаар, 'Эх сурвалж:' гэх мэт тэмдэглэгээг хариултын эхэнд "
+                "бүү бич. Хариултын төгсгөлд ашигласан эх сурвалжийг зөвхөн "
+                "[1] гэсэн дугаараар дурд."
             )
         else:
             user_message = (
                 f"[Асуулт]\n{query}\n\n"
                 f"[Эх сурвалж]\n{context}\n\n"
                 "[Даалгавар]\n"
-                "Дээрх эх сурвалжийг зөвхөн баримт болгон ашиглаад, Монгол хэлээр "
-                "2–4 өгүүлбэрт, цэвэр, байгалийн, дүрмийн алдаагүй хариулт бич. "
-                "Эх сурвалжийн текстийг үгчлэн бүү хуул; утгыг нь эргүүлэн товчоор илэрхийл. "
-                "Файлын нэр, хуудасны дугаар, '[1] ...pdf (х.N)' гэх мэт толгойг "
-                "хариултын эхэнд бүү бич. Зөвхөн өгүүлбэрийн төгсгөлд [1], [2] гэж дурд. "
+                "Дээрх эх сурвалжийг зөвхөн баримт болгон ашиглаад, Монгол "
+                "хэлээр 2–5 өгүүлбэрт, цэвэр, байгалийн, дүрмийн алдаагүй "
+                "хариулт бич. Шаардлагатай бол хуулийн зүйл, заалтыг нэрлэн "
+                "дурд. Эх сурвалжийн текстийг үгчлэн бүү хуул; утгыг нь "
+                "эргүүлэн товчоор илэрхийл. Файлын нэр, хуудасны дугаар, "
+                "'[1] ...pdf (х.N)' гэх мэт толгойг хариултын эхэнд бүү бич. "
+                "Зөвхөн өгүүлбэрийн төгсгөлд [1], [2] гэж дурд. "
                 "Хэрэв эх сурвалж асуултад хангалтгүй бол "
                 "'Хангалттай мэдээлэл олдсонгүй.' гэж бич."
             )
 
-        payload = {
-            "model": self.config.llm_model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_message},
-            ],
-            "options": {
-                "temperature": self.config.llm_temperature,
-                "num_predict": self.config.llm_max_tokens,
-            },
-            "stream": False,
-        }
-
         try:
-            response = requests.post(
-                self._ollama_chat_url,
-                json=payload,
-                timeout=self.config.llm_timeout,
-                headers={"Content-Type": "application/json; charset=utf-8"},
-            )
-            response.raise_for_status()
+            from google.genai import types
 
-            data = response.json()
-            raw_answer = data["message"]["content"]
-            answer = _clean_llm_answer(raw_answer)
-            tokens_used = (
-                data.get("prompt_eval_count", 0) + data.get("eval_count", 0)
+            # 2.5 models do internal "thinking" by default which eats the
+            # output budget before any visible answer is produced. We're
+            # grounded in retrieved context so a thinking pass adds latency
+            # without quality gain — disable it.
+            thinking = types.ThinkingConfig(thinking_budget=0)
+            gen_config = types.GenerateContentConfig(
+                system_instruction=self.config.system_prompt,
+                temperature=self.config.llm_temperature,
+                max_output_tokens=self.config.llm_max_tokens,
+                thinking_config=thinking,
             )
+
+            response = None
+            last_err: Optional[Exception] = None
+            for attempt in range(_GEMINI_TRANSIENT_RETRIES + 1):
+                try:
+                    response = client.models.generate_content(
+                        model=self.config.llm_model,
+                        contents=user_message,
+                        config=gen_config,
+                    )
+                    break
+                except Exception as inner:
+                    last_err = inner
+                    msg = str(inner)
+                    is_transient = (
+                        "503" in msg or "504" in msg
+                        or "unavailable" in msg.lower()
+                        or "deadline" in msg.lower()
+                    )
+                    if not is_transient or attempt >= _GEMINI_TRANSIENT_RETRIES:
+                        raise
+                    time.sleep(_GEMINI_RETRY_BACKOFF_S * (attempt + 1))
+
+            if response is None:
+                # Defensive — _shouldn't_ reach here without an exception above.
+                raise last_err or RuntimeError("Empty response from Gemini")
+
+            raw_answer = (response.text or "").strip()
+            answer = _clean_llm_answer(raw_answer)
+
+            usage = getattr(response, "usage_metadata", None)
+            tokens_used = 0
+            if usage is not None:
+                tokens_used = int(
+                    (getattr(usage, "prompt_token_count", 0) or 0)
+                    + (getattr(usage, "candidates_token_count", 0) or 0)
+                )
 
             return {
                 "answer": answer,
@@ -369,40 +323,30 @@ class AnswerGenerator:
                 "context_chunks_used": len(retrieved_chunks),
             }
 
-        except requests.exceptions.Timeout:
-            # Source fallback: return top chunk content rather than empty error
-            fallback = self._source_fallback(retrieved_chunks)
-            return {
-                "answer": fallback,
-                "sources": sources,
-                "model_used": "source_fallback",
-                "tokens_used": 0,
-                "context_chunks_used": len(retrieved_chunks),
-                "error": "Request timed out",
-            }
-
-        except requests.exceptions.ConnectionError:
-            return {
-                "answer": (
-                    "Уучлаарай, Ollama сервер ажиллахгүй байна. "
-                    "Терминалд `ollama serve` гэж ажиллуулна уу."
-                ),
-                "sources": sources,
-                "model_used": self.config.llm_model,
-                "tokens_used": 0,
-                "context_chunks_used": len(retrieved_chunks),
-                "error": "Ollama not running",
-            }
-
         except Exception as e:
-            return {
-                "answer": (
+            # Gemini surface errors: rate limit, invalid key, safety block, etc.
+            err = str(e)
+            lower = err.lower()
+            if "api key" in lower or "permission" in lower or "401" in err or "403" in err:
+                friendly = (
+                    "Gemini API түлхүүр буруу эсвэл хүчингүй байна. "
+                    "Шинэ түлхүүрийг .env файлд оруулна уу."
+                )
+            elif "quota" in lower or "rate" in lower or "429" in err:
+                friendly = (
+                    "Gemini API-ийн үнэгүй хязгаар дуусчээ. "
+                    "Хэдэн минутын дараа дахин оролдоно уу."
+                )
+            else:
+                friendly = (
                     "Уучлаарай, хариулт үүсгэхэд алдаа гарлаа. "
                     "Дахин оролдоно уу."
-                ),
+                )
+            return {
+                "answer": friendly,
                 "sources": sources,
                 "model_used": self.config.llm_model,
                 "tokens_used": 0,
                 "context_chunks_used": len(retrieved_chunks),
-                "error": str(e),
+                "error": err,
             }
