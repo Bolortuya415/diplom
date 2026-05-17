@@ -15,7 +15,7 @@
 Тэгшбот is a closed-domain conversational assistant that answers Mongolian-language
 questions in three areas:
 
-1. **Hүйсийн тэгш эрх / Gender equality** — equal opportunity, workplace harassment, gender-based violence.
+1. **Хүйсийн тэгш эрх / Gender equality** — equal opportunity, workplace harassment, gender-based violence.
 2. **Ялгаварлан гадуурхалт / Anti-discrimination** — protected categories, complaint procedures, school harassment.
 3. **Хөгжлийн бэрхшээлтэй иргэдийн эрх / Disability rights** — inclusive education, accessibility, employment.
 
@@ -167,33 +167,33 @@ help-seeking questions and benign phrases. It was removed in favour of an
 
 ## 3. Technology Stack & Rationale
 
-| Layer | Choice | Why this choice | Reference |
-|---|---|---|---|
-| Frontend | **React 18 + Vite 5** | Modern SPA, instant HMR, no JSX build hassles | [react.dev](https://react.dev/), [vitejs.dev](https://vitejs.dev/) |
-| Backend | **FastAPI** | Async, automatic OpenAPI docs, Pydantic validation | Ramírez, S. *FastAPI* — [fastapi.tiangolo.com](https://fastapi.tiangolo.com/) |
-| Server | **Uvicorn** | ASGI server with reload, the canonical FastAPI runner | [uvicorn.org](https://www.uvicorn.org/) |
-| Embeddings | **BGE-M3** (1024-dim) | Multilingual including Mongolian Cyrillic; outperforms MiniLM on low-resource languages | Chen et al. (2024). *BGE M3-Embedding: Multi-Lingual, Multi-Functionality, Multi-Granularity Text Embeddings via Self-Knowledge Distillation* — [arXiv:2402.03216](https://arxiv.org/abs/2402.03216) |
-| Reranker (optional) | **BGE-reranker-v2-m3** | Cross-encoder; lifts precision at top-k. Disabled by default for CPU latency. | Same author group. [huggingface.co/BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) |
-| Embedding host | **sentence-transformers** | Stable Python interface; lazy model loading | Reimers & Gurevych (2019). *Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks*. EMNLP. — [arXiv:1908.10084](https://arxiv.org/abs/1908.10084) |
-| Vector DB | **ChromaDB** (persistent, embedded) | OSS, SQLite-backed, metadata filtering — no external server needed | [trychroma.com](https://www.trychroma.com/) |
-| LLM | **Google Gemini 2.5 Flash** | Strong Mongolian fluency; generous free tier (~250 req/day); fast | Google DeepMind. *Gemini* — [ai.google.dev](https://ai.google.dev/) |
-| LLM SDK | **google-genai** ≥ 1.0 | Current official SDK (replaced deprecated google-generativeai) | [github.com/googleapis/python-genai](https://github.com/googleapis/python-genai) |
-| PDF extraction | **PyMuPDF (fitz)** | Best Cyrillic extraction; preserves page numbers for citation | [pymupdf.readthedocs.io](https://pymupdf.readthedocs.io/) |
-| Relational store | **SQLite (WAL mode)** | Zero-config, single file, sufficient for chat logs and feedback | [sqlite.org](https://www.sqlite.org/) |
-| Config | **python-dotenv** | Standard `.env` loader | [pypi.org/project/python-dotenv/](https://pypi.org/project/python-dotenv/) |
+| Layer               | Choice                              | Why this choice                                                                         | Reference                                                                                                                                                                                            |
+| ------------------- | ----------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend            | **React 18 + Vite 5**               | Modern SPA, instant HMR, no JSX build hassles                                           | [react.dev](https://react.dev/), [vitejs.dev](https://vitejs.dev/)                                                                                                                                   |
+| Backend             | **FastAPI**                         | Async, automatic OpenAPI docs, Pydantic validation                                      | Ramírez, S. _FastAPI_ — [fastapi.tiangolo.com](https://fastapi.tiangolo.com/)                                                                                                                        |
+| Server              | **Uvicorn**                         | ASGI server with reload, the canonical FastAPI runner                                   | [uvicorn.org](https://www.uvicorn.org/)                                                                                                                                                              |
+| Embeddings          | **BGE-M3** (1024-dim)               | Multilingual including Mongolian Cyrillic; outperforms MiniLM on low-resource languages | Chen et al. (2024). _BGE M3-Embedding: Multi-Lingual, Multi-Functionality, Multi-Granularity Text Embeddings via Self-Knowledge Distillation_ — [arXiv:2402.03216](https://arxiv.org/abs/2402.03216) |
+| Reranker (optional) | **BGE-reranker-v2-m3**              | Cross-encoder; lifts precision at top-k. Disabled by default for CPU latency.           | Same author group. [huggingface.co/BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3)                                                                                          |
+| Embedding host      | **sentence-transformers**           | Stable Python interface; lazy model loading                                             | Reimers & Gurevych (2019). _Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks_. EMNLP. — [arXiv:1908.10084](https://arxiv.org/abs/1908.10084)                                           |
+| Vector DB           | **ChromaDB** (persistent, embedded) | OSS, SQLite-backed, metadata filtering — no external server needed                      | [trychroma.com](https://www.trychroma.com/)                                                                                                                                                          |
+| LLM                 | **Google Gemini 2.5 Flash**         | Strong Mongolian fluency; generous free tier (~250 req/day); fast                       | Google DeepMind. _Gemini_ — [ai.google.dev](https://ai.google.dev/)                                                                                                                                  |
+| LLM SDK             | **google-genai** ≥ 1.0              | Current official SDK (replaced deprecated google-generativeai)                          | [github.com/googleapis/python-genai](https://github.com/googleapis/python-genai)                                                                                                                     |
+| PDF extraction      | **PyMuPDF (fitz)**                  | Best Cyrillic extraction; preserves page numbers for citation                           | [pymupdf.readthedocs.io](https://pymupdf.readthedocs.io/)                                                                                                                                            |
+| Relational store    | **SQLite (WAL mode)**               | Zero-config, single file, sufficient for chat logs and feedback                         | [sqlite.org](https://www.sqlite.org/)                                                                                                                                                                |
+| Config              | **python-dotenv**                   | Standard `.env` loader                                                                  | [pypi.org/project/python-dotenv/](https://pypi.org/project/python-dotenv/)                                                                                                                           |
 
 ### 3.1 Foundational RAG references
 
 The retrieval-augmented-generation pattern itself derives from:
 
-- Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., Küttler, H., Lewis, M., Yih, W., Rocktäschel, T., Riedel, S., & Kiela, D. (2020). **Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks.** *NeurIPS 2020.* — [arXiv:2005.11401](https://arxiv.org/abs/2005.11401)
-- Guu, K., Lee, K., Tung, Z., Pasupat, P., & Chang, M.-W. (2020). **REALM: Retrieval-Augmented Language Model Pre-Training.** *ICML 2020.* — [arXiv:2002.08909](https://arxiv.org/abs/2002.08909)
+- Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., Küttler, H., Lewis, M., Yih, W., Rocktäschel, T., Riedel, S., & Kiela, D. (2020). **Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks.** _NeurIPS 2020._ — [arXiv:2005.11401](https://arxiv.org/abs/2005.11401)
+- Guu, K., Lee, K., Tung, Z., Pasupat, P., & Chang, M.-W. (2020). **REALM: Retrieval-Augmented Language Model Pre-Training.** _ICML 2020._ — [arXiv:2002.08909](https://arxiv.org/abs/2002.08909)
 
 ### 3.2 Original (pre-refactor) classifier reference
 
 The earlier sensitive-content classifier — kept in the [backup directory](../backup/old-architecture-2026-05-14/) for thesis documentation — was a TF-IDF + Logistic Regression model trained with:
 
-- Pedregosa, F., Varoquaux, G., Gramfort, A., et al. (2011). **Scikit-learn: Machine Learning in Python.** *JMLR.* — [arXiv:1201.0490](https://arxiv.org/abs/1201.0490)
+- Pedregosa, F., Varoquaux, G., Gramfort, A., et al. (2011). **Scikit-learn: Machine Learning in Python.** _JMLR._ — [arXiv:1201.0490](https://arxiv.org/abs/1201.0490)
 
 It is no longer in the active code path; the LLM-as-judge replaced it.
 
@@ -267,14 +267,14 @@ Boloroo/
 
 ### 5.1 Prerequisites
 
-| Tool | Minimum version | Notes |
-|---|---|---|
-| Python | **3.12+** (project tested with 3.14) | Used for the backend, ingestion, training scripts |
-| Node.js | **18+** | Used for the React frontend (Vite ≥ 5) |
-| Disk | ~5 GB free | BGE-M3 (~560 MB) downloaded on first ingestion; sentence-transformers cache; ChromaDB data |
-| Memory | 4 GB minimum, 8 GB recommended | BGE-M3 is the heaviest in-memory model |
-| Internet | Required | Gemini API + first-time HuggingFace model download |
-| Gemini API key | Free at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) | No card required for free tier |
+| Tool           | Minimum version                                                                  | Notes                                                                                      |
+| -------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Python         | **3.12+** (project tested with 3.14)                                             | Used for the backend, ingestion, training scripts                                          |
+| Node.js        | **18+**                                                                          | Used for the React frontend (Vite ≥ 5)                                                     |
+| Disk           | ~5 GB free                                                                       | BGE-M3 (~560 MB) downloaded on first ingestion; sentence-transformers cache; ChromaDB data |
+| Memory         | 4 GB minimum, 8 GB recommended                                                   | BGE-M3 is the heaviest in-memory model                                                     |
+| Internet       | Required                                                                         | Gemini API + first-time HuggingFace model download                                         |
+| Gemini API key | Free at [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) | No card required for free tier                                                             |
 
 ### 5.2 First-time setup
 
@@ -309,12 +309,14 @@ cd ..
 Two terminals, both from the project root:
 
 **Terminal A — backend:**
+
 ```bash
 .venv\Scripts\activate
 uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 You should see:
+
 ```
 Starting Boloroo chatbot backend...
 Database initialized at: ...\data\boloroo.db
@@ -323,6 +325,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8000
 ```
 
 **Terminal B — frontend:**
+
 ```bash
 cd frontend
 npm run dev
@@ -362,16 +365,16 @@ same filenames.
 
 Key entries in `.env`:
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `GEMINI_API_KEY` | *(empty)* | Required. Get free key at AI Studio. Without it, /chat returns a clear "set the key" message. |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Use `gemini-2.5-flash-lite` for higher RPM at slightly lower quality. |
-| `LLM_TEMPERATURE` | `0.15` | Low temperature for factual legal answers. |
-| `LLM_MAX_TOKENS` | `600` | Enough for 2–5 sentence Mongolian replies. |
-| `EMBEDDING_MODEL` | `BAAI/bge-m3` | 1024-dim multilingual model. |
-| `USE_RERANKER` | `false` | Set `true` to add BGE-reranker-v2-m3 — better precision, +~40 s on CPU. |
-| `TOP_K` | `4` | Chunks passed to the LLM after retrieval. |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `500` / `50` | Character-level chunker parameters. |
+| Variable                       | Default            | Purpose                                                                                       |
+| ------------------------------ | ------------------ | --------------------------------------------------------------------------------------------- |
+| `GEMINI_API_KEY`               | _(empty)_          | Required. Get free key at AI Studio. Without it, /chat returns a clear "set the key" message. |
+| `GEMINI_MODEL`                 | `gemini-2.5-flash` | Use `gemini-2.5-flash-lite` for higher RPM at slightly lower quality.                         |
+| `LLM_TEMPERATURE`              | `0.15`             | Low temperature for factual legal answers.                                                    |
+| `LLM_MAX_TOKENS`               | `600`              | Enough for 2–5 sentence Mongolian replies.                                                    |
+| `EMBEDDING_MODEL`              | `BAAI/bge-m3`      | 1024-dim multilingual model.                                                                  |
+| `USE_RERANKER`                 | `false`            | Set `true` to add BGE-reranker-v2-m3 — better precision, +~40 s on CPU.                       |
+| `TOP_K`                        | `4`                | Chunks passed to the LLM after retrieval.                                                     |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `500` / `50`       | Character-level chunker parameters.                                                           |
 
 ---
 
@@ -382,9 +385,11 @@ Two scaffolds live in `scripts/`:
 - **`evaluate_retrieval.py`** — computes Precision@k, Hit@k, and Mean
   Reciprocal Rank against a benchmark question set (`BENCHMARK_QUESTIONS`).
   Run after `ingest.py`:
+
   ```bash
   python scripts/evaluate_retrieval.py
   ```
+
   Results land in `scripts/retrieval_evaluation_results.json`.
 
 - **`evaluate_answers.py`** — answer-quality template using the
@@ -438,28 +443,33 @@ Concretely, the system supports the thesis's main claims:
 ## 10. References (consolidated)
 
 **RAG and retrieval foundations**
-- Lewis et al. (2020). Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. *NeurIPS 2020.* [arXiv:2005.11401](https://arxiv.org/abs/2005.11401)
-- Guu et al. (2020). REALM: Retrieval-Augmented Language Model Pre-Training. *ICML 2020.* [arXiv:2002.08909](https://arxiv.org/abs/2002.08909)
-- Karpukhin et al. (2020). Dense Passage Retrieval for Open-Domain Question Answering. *EMNLP 2020.* [arXiv:2004.04906](https://arxiv.org/abs/2004.04906)
+
+- Lewis et al. (2020). Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. _NeurIPS 2020._ [arXiv:2005.11401](https://arxiv.org/abs/2005.11401)
+- Guu et al. (2020). REALM: Retrieval-Augmented Language Model Pre-Training. _ICML 2020._ [arXiv:2002.08909](https://arxiv.org/abs/2002.08909)
+- Karpukhin et al. (2020). Dense Passage Retrieval for Open-Domain Question Answering. _EMNLP 2020._ [arXiv:2004.04906](https://arxiv.org/abs/2004.04906)
 
 **Embeddings & rerankers**
-- Reimers & Gurevych (2019). Sentence-BERT. *EMNLP 2019.* [arXiv:1908.10084](https://arxiv.org/abs/1908.10084)
+
+- Reimers & Gurevych (2019). Sentence-BERT. _EMNLP 2019._ [arXiv:1908.10084](https://arxiv.org/abs/1908.10084)
 - Chen, Xiao, Zhang, Luo, Lian, Liu (2024). BGE M3-Embedding. [arXiv:2402.03216](https://arxiv.org/abs/2402.03216)
 - Xiao, Liu, Zhang, Muennighoff (2023). C-Pack: Packaged Resources To Advance General Chinese Embedding. [arXiv:2309.07597](https://arxiv.org/abs/2309.07597)
 
 **Foundation models**
-- Google DeepMind. *Gemini 2.5 model family* — [ai.google.dev](https://ai.google.dev/)
+
+- Google DeepMind. _Gemini 2.5 model family_ — [ai.google.dev](https://ai.google.dev/)
 - google-genai SDK — [github.com/googleapis/python-genai](https://github.com/googleapis/python-genai)
 
 **Libraries**
+
 - FastAPI — Ramírez, S. [fastapi.tiangolo.com](https://fastapi.tiangolo.com/)
 - ChromaDB — [trychroma.com](https://www.trychroma.com/)
 - PyMuPDF — [pymupdf.readthedocs.io](https://pymupdf.readthedocs.io/)
-- scikit-learn — Pedregosa et al. (2011). *JMLR.*
+- scikit-learn — Pedregosa et al. (2011). _JMLR._
 - React — [react.dev](https://react.dev/)
 - Vite — [vitejs.dev](https://vitejs.dev/)
 
 **Mongolian legislation (primary sources used in the corpus)**
+
 - Constitution of Mongolia (1992).
 - Law on Gender Equality (Жендэрийн эрх тэгш байдлыг хангах тухай хууль), 2011.
 - Law on the Rights of Persons with Disabilities (Хөгжлийн бэрхшээлтэй хүний эрхийн тухай хууль), 2016.
@@ -468,21 +478,22 @@ Concretely, the system supports the thesis's main claims:
 - Civil Code (Иргэний хууль).
 
 **External tools used during development**
+
 - Claude Code (Anthropic) — assisted with implementation iterations, refactoring, and documentation drafting under the author's direction.
 
 ---
 
 ## 11. Quick Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `/api/chat` returns "Gemini API түлхүүр тохируулагдаагүй байна" | `GEMINI_API_KEY` unset | Edit `.env`, restart backend |
-| `429 RESOURCE_EXHAUSTED` from Gemini | Free-tier daily quota hit | Wait until UTC midnight, or switch `GEMINI_MODEL=gemini-2.5-flash-lite` |
-| `index_loaded: false` on /health | ChromaDB collection empty | Run `python scripts/ingest.py` |
+| Symptom                                                                  | Likely cause                                                        | Fix                                                                                                           |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `/api/chat` returns "Gemini API түлхүүр тохируулагдаагүй байна"          | `GEMINI_API_KEY` unset                                              | Edit `.env`, restart backend                                                                                  |
+| `429 RESOURCE_EXHAUSTED` from Gemini                                     | Free-tier daily quota hit                                           | Wait until UTC midnight, or switch `GEMINI_MODEL=gemini-2.5-flash-lite`                                       |
+| `index_loaded: false` on /health                                         | ChromaDB collection empty                                           | Run `python scripts/ingest.py`                                                                                |
 | Port 8000 reports "address already in use" but no Python process visible | Orphan multiprocessing-fork child still holds the socket on Windows | `Get-CimInstance Win32_Process \| Where-Object { $_.CommandLine -match "spawn_main" } \| Stop-Process -Force` |
-| Frontend shows "Уучлаарай, алдаа гарлаа" | `/api/chat` returned non-200 or fetch failed | Check backend log for the actual error |
-| BGE-M3 download fails | HuggingFace rate limit / network | Re-run; or set `HF_TOKEN` in env for higher quota |
+| Frontend shows "Уучлаарай, алдаа гарлаа"                                 | `/api/chat` returned non-200 or fetch failed                        | Check backend log for the actual error                                                                        |
+| BGE-M3 download fails                                                    | HuggingFace rate limit / network                                    | Re-run; or set `HF_TOKEN` in env for higher quota                                                             |
 
 ---
 
-*End of guide. Questions / contributions welcome.*
+_End of guide. Questions / contributions welcome._
