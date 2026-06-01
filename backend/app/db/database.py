@@ -35,6 +35,17 @@ def get_db():
 def init_db():
     """Initialize database tables."""
     with get_db() as conn:
+        # Migration: the old feedback schema used CHECK(rating IN (-1, 1))
+        # for thumbs up / thumbs down. The new feedback system uses a
+        # 1-5 Likert rating, so we recreate the table if the old constraint
+        # is detected. Old rows (8 thumbs values) are dropped because they
+        # are not comparable to the new 1-5 scale.
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='feedback'"
+        ).fetchone()
+        if row and "IN (-1, 1)" in (row[0] or ""):
+            conn.execute("DROP TABLE feedback")
+
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS documents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,8 +86,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS feedback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 chat_id INTEGER NOT NULL,
-                rating INTEGER NOT NULL CHECK(rating IN (-1, 1)),
+                rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
                 comment TEXT,
+                session_id TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (chat_id) REFERENCES chat_logs(id)
             );
@@ -84,6 +96,7 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
             CREATE INDEX IF NOT EXISTS idx_chat_logs_timestamp ON chat_logs(timestamp);
             CREATE INDEX IF NOT EXISTS idx_feedback_chat ON feedback(chat_id);
+            CREATE INDEX IF NOT EXISTS idx_feedback_session ON feedback(session_id);
         """)
 
     print(f"Database initialized at: {DB_PATH}")

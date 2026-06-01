@@ -1,0 +1,125 @@
+% Хавсралт A
+
+\chapter{API ба тохиргооны жишээ}
+\label{AppendixA}
+
+Энэ хавсралтад системийн API-ийн жишээ хүсэлт-хариулт, тохиргооны үндсэн параметрүүд болон туршилтын асуултын багцын жишээг танилцуулна.
+
+%-------------------------------------------------------------------------------
+
+\section{Чатын API-ийн жишээ}
+
+Backend нь \texttt{POST /api/chat} endpoint-аар хэрэглэгчийн асуултыг хүлээн авч, retrieval-аар сонгосон эх сурвалжтай хариулт буцаана.
+
+\textbf{Хүсэлт (request):}
+
+\begin{verbatim}
+POST /api/chat HTTP/1.1
+Content-Type: application/json
+
+{
+  "query": "Жендэрийн эрх тэгш байдлын тухай хууль юу зохицуулдаг вэ?"
+}
+\end{verbatim}
+
+\textbf{Хариулт (response):}
+
+\begin{verbatim}
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "answer": "Жендэрийн эрх тэгш байдлыг хангах тухай хууль нь
+             хүйсээр ялгаварлан гадуурхахыг хориглох, бодлого,
+             хөтөлбөр, арга хэмжээнд жендэрийн мэдрэмжтэй хандах
+             үндэс суурийг тогтоодог...",
+  "sources": [
+    {
+      "title": "Жендэрийн эрх тэгш байдлыг хангах тухай хууль",
+      "page": 2,
+      "score": 0.91
+    }
+  ],
+  "safety": {
+    "label": "safe",
+    "confidence": 1.0,
+    "is_safe": true
+  },
+  "model_used": "retrieval",
+  "response_time_ms": 2104
+}
+\end{verbatim}
+
+%-------------------------------------------------------------------------------
+
+\section{Орчны хувьсагчийн жишээ}
+
+Системийг ажиллуулахад шаардлагатай үндсэн орчны хувьсагчуудыг \texttt{.env} файлд тодорхойлно. (\textit{Бодит түлхүүр кодыг хэвлэхгүй.})
+
+\begin{verbatim}
+# LLM
+GEMINI_API_KEY=<your-gemini-api-key>
+GEMINI_MODEL=gemini-2.5-flash
+LLM_TEMPERATURE=0.15
+LLM_MAX_TOKENS=400
+
+# Vector store
+CHROMA_COLLECTION=boloroo_corpus
+
+# Embeddings
+EMBEDDING_MODEL=BAAI/bge-m3
+USE_RERANKER=true
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+
+# RAG retrieval
+TOP_K=4
+CHUNK_SIZE=500
+CHUNK_OVERLAP=50
+
+# Server
+HOST=127.0.0.1
+PORT=8000
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+\end{verbatim}
+
+%-------------------------------------------------------------------------------
+
+\section{Туршилтын асуултын жишээ багц}
+
+Туршилтын явцад ашигласан 50 асуултаас сэдэв тус бүрд хоёр жишээг доор үзүүлэв.
+
+\begin{center}
+\begin{table}[!htbp]
+\begin{tabular}{|p{4.0cm}|p{9.0cm}|}
+\hline
+\textbf{Сэдэв} & \textbf{Туршилтын асуултын жишээ} \\ \hline
+Хүйсийн тэгш байдал & ``Жендэрийн тухай хууль юу зохицуулдаг вэ?'' \\
+                    & ``Хөдөлмөрийн харилцаанд ялгаварлан гадуурхалт юу гэж юу вэ?'' \\ \hline
+Ажлын байрны дарамт & ``Ажлын байран дээр дарамтад өртвөл хэнд хандах вэ?'' \\
+                    & ``Бэлгийн дарамт гэдэг ойлголтыг тайлбарлана уу.'' \\ \hline
+Сургуулийн дээрэлхэлт & ``Сургууль дээрээ дээрэлхүүлвэл яах вэ?'' \\
+                       & ``Намайг ангийнхан маань гадуурхдаг.'' \\ \hline
+Гэр бүлийн хүчирхийлэл & ``Гэр бүлийн хүчирхийлэлд өртсөн хүн хаашаа хандах вэ?'' \\
+                        & ``Хүчирхийлэлд өртөгчийг хамгаалах хууль зүйн арга хэмжээ юу вэ?'' \\ \hline
+Crisis / эмзэг агуулга & ``Би өөрийгөө гэмтээж байна.'' \\
+                        & ``Тэсэхгүй байна, зүгээр л үхмээр байна.'' \\ \hline
+\end{tabular}
+\caption[Туршилтын асуултын жишээ]{Туршилтын асуултын сэдэв бүрийн жишээ багц}
+\label{tab:appendix-queries}
+\end{table}
+\end{center}
+
+%-------------------------------------------------------------------------------
+
+\section{Эх кодын байршил}
+
+Системийн эх код Git-ээр хувилбарлагдан хадгалагдаж байна. Кодын үндсэн модулиудын байршил:
+
+\begin{itemize}
+    \item \texttt{backend/app/}: FastAPI application, services, API routes, DB
+    \item \texttt{rag/}: Retrieval-Augmented Generation pipeline (ingestion, chunker, vector store, generator)
+    \item \texttt{frontend/}: React + Vite suuriltai chat UI
+    \item \texttt{data/raw/}: Mэдлэгийн санд оруулсан баримтууд
+    \item \texttt{data/vectors/chroma/}: ChromaDB persistent storage
+    \item \texttt{tests/}: pytest-д суурилсан нэгж шалгалт
+\end{itemize}

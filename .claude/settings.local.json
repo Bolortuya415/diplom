@@ -16,7 +16,17 @@
       "Bash(python)",
       "Bash(python _solutions/forensic/shivnegch/solve.py)",
       "Bash(python _solutions/reverse/khunkher/solve.py)",
-      "Bash(python _solutions/misc/ovoo/solve.py)"
+      "Bash(python _solutions/misc/ovoo/solve.py)",
+      "Bash(pip install *)",
+      "Bash(where powerpnt *)",
+      "Read(//c/Program Files/**)",
+      "Bash(python build_ppt.py)",
+      "Bash(mkdir -p final_media)",
+      "Bash(python build_revised.py)",
+      "Bash(where pdflatex *)",
+      "Bash(where xelatex *)",
+      "Bash(where bibtex *)",
+      "Bash(pdflatex -interaction=nonstopmode main.tex)"
     ]
   }
 }

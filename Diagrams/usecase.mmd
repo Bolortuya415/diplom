@@ -1,0 +1,74 @@
+flowchart LR
+    User(("👤<br/>Хэрэглэгч"))
+    Admin(("👤<br/>Админ"))
+    Gemini["🌐 Gemini API"]
+
+    subgraph System["Тэгшбот — RAG чатбот систем"]
+        direction TB
+
+        subgraph UserFlow["Хэрэглэгчийн үндсэн үйлдлүүд"]
+            UC1(["Асуулт асуух"])
+            UC2(["Үргэлжилсэн яриа<br/>(follow-up)"])
+            UC3(["Эх сурвалж харах"])
+            UC4(["Санал өгөх<br/>(thumbs up/down)"])
+            UC5(["Bot танилцуулга<br/>авах"])
+        end
+
+        subgraph Safety["Аюулгүй байдлын урсгал"]
+            UC6(["Crisis илрүүлэх"])
+            UC7(["Тусламжийн утас<br/>харуулах"])
+        end
+
+        subgraph Internal["Дотоод боловсруулалт"]
+            UC8(["Латин→Кирилл<br/>хөрвүүлэх"])
+            UC9(["Query rewrite<br/>(follow-up resolver)"])
+            UC10(["Document retrieval<br/>(ChromaDB + BGE-M3)"])
+            UC11(["LLM хариу үүсгэх<br/>(Gemini)"])
+        end
+
+        subgraph AdminFlow["Админы үйлдэл (offline)"]
+            UC12(["Баримт оруулах<br/>(scripts/ingest.py)"])
+            UC13(["Vector index<br/>бүтээх"])
+        end
+    end
+
+    %% User associations
+    User --- UC1
+    User --- UC2
+    User --- UC3
+    User --- UC4
+    User --- UC5
+
+    %% Admin associations
+    Admin --- UC12
+
+    %% Include relationships (dashed, «include»)
+    UC1 -. "«include»" .-> UC8
+    UC1 -. "«include»" .-> UC6
+    UC1 -. "«include»" .-> UC10
+    UC1 -. "«include»" .-> UC11
+    UC2 -. "«include»" .-> UC9
+    UC2 -. "«include»" .-> UC10
+    UC12 -. "«include»" .-> UC13
+
+    %% Extend relationships (dashed, «extend»)
+    UC6 -. "«extend»" .-> UC7
+
+    %% External system calls
+    UC9 --> Gemini
+    UC11 --> Gemini
+
+    %% Styles
+    classDef actor fill:#fff7d6,stroke:#c89b00,color:#000,stroke-width:2px
+    classDef usecase fill:#dbe9ff,stroke:#3a6db5,color:#000
+    classDef safety fill:#fde0dc,stroke:#a32220,color:#000
+    classDef internal fill:#e6f5d0,stroke:#5b8a3c,color:#000
+    classDef admin fill:#e8e3d8,stroke:#6b6353,color:#000
+    classDef external fill:#fde0dc,stroke:#a32220,color:#000
+
+    class User,Admin actor
+    class UC1,UC2,UC3,UC4,UC5 usecase
+    class UC6,UC7 safety
+    class UC8,UC9,UC10,UC11 internal
+    class UC12,UC13 admin
+    class Gemini external

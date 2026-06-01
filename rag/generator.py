@@ -94,6 +94,65 @@ class AnswerGenerator:
         self._client = genai.Client(api_key=api_key)
         return self._client
 
+    # ── Follow-up query rewriting ────────────────────────────────────
+
+    def rewrite_query(self, query: str, history: list[dict]) -> str:
+        """
+        Rewrite a follow-up question into a standalone question using
+        recent chat history. Returns the original query unchanged if
+        rewriting is not needed, history is empty, or Gemini is
+        unavailable.
+        """
+        if not history or not query.strip():
+            return query
+
+        client = self._get_client()
+        if client is None:
+            return query
+
+        recent = history[-6:]
+        transcript_lines = []
+        for turn in recent:
+            role = turn.get("role")
+            content = (turn.get("content") or "").strip()
+            if not content:
+                continue
+            label = "Хэрэглэгч" if role == "user" else "Бот"
+            transcript_lines.append(f"{label}: {content}")
+        transcript = "\n".join(transcript_lines)
+
+        prompt = (
+            "Доорх бол хэрэглэгч ба чатботын ярианы түүх.\n\n"
+            f"{transcript}\n\n"
+            f"Хэрэглэгчийн шинэ асуулт: {query}\n\n"
+            "Шинэ асуултыг өмнөх ярианы контекстод тулгуурлан бие даасан, "
+            "бүрэн ойлгомжтой нэг өгүүлбэр болгон Монгол хэлээр дахин бич. "
+            "Хэрэв шинэ асуулт өөрөө бие даасан, тодорхой байгаа бол яг тэр "
+            "хэвээр буцаа. Зөвхөн дахин бичсэн асуултыг л буцаа — өөр ямар ч "
+            "тайлбар, тэмдэглэгээ бүү нэм."
+        )
+
+        try:
+            from google.genai import types
+
+            gen_config = types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=120,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            )
+            response = client.models.generate_content(
+                model=self.config.llm_model,
+                contents=prompt,
+                config=gen_config,
+            )
+            rewritten = (getattr(response, "text", "") or "").strip()
+            rewritten = rewritten.strip('"').strip("'").strip()
+            if not rewritten or len(rewritten) > 400:
+                return query
+            return rewritten
+        except Exception:
+            return query
+
     # ── Chunk formatting ─────────────────────────────────────────────
 
     def _deduplicate_chunks(self, chunks: list[dict]) -> list[dict]:

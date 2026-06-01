@@ -50,12 +50,29 @@ def _log_route(route: str, query: str) -> None:
     print(msg, flush=True)
 
 
-# Greetings that get a direct reply without any RAG or LLM call
+# Greetings that get a direct reply without any RAG or LLM call.
+# Exact-equality set kept for the fast path on bare greetings.
 _GREETINGS: frozenset[str] = frozenset({
     "сайн уу", "сайн байна уу", "сайн байцгаана уу",
     "өглөөний мэнд", "үдийн мэнд", "оройн мэнд",
     "hi", "hello", "hey", "сайн",
 })
+
+# Regex for greetings that may carry trailing words ("сайн уу найз",
+# "hi there", "сайнуу", "саину наиз" from Latin transliteration etc.).
+# Matches at the start of the normalized message; a trailing word
+# boundary / punctuation / end-of-string is required so the pattern
+# doesn't swallow longer words that happen to begin with "сайн".
+_GREETING_PATTERN_RE = re.compile(
+    r"^\s*("
+    r"сайн\s+(?:у+|байна\s+у+|байцгаана\s+у+)"
+    r"|с[аи]й?ну+"
+    r"|hi|hello|hey|hola"
+    r"|х(?:и|эй|элло+|алло+)"
+    r"|(?:өглөөний|үдийн|оройн)\s+мэнд"
+    r")(?:\b|\s|[,!?.]|$)",
+    re.IGNORECASE | re.UNICODE,
+)
 
 # Vague queries with no clear topic — return a clarification question instead
 # of wasting an LLM call that would produce a useless answer.
@@ -70,7 +87,12 @@ _VAGUE_QUERIES: frozenset[str] = frozenset({
     "тайлбарлаач", "ойлгосонгүй",
 })
 
-_GREETING_RESPONSE = "Сайн байна уу? Танд юугаар туслах вэ?"
+_GREETING_RESPONSE = (
+    "Сайн байна уу! 👋 Би Тэгшбот — Монгол хуульд тулгуурлан "
+    "хүйсийн тэгш эрх, ялгаварлан гадуурхалт, хөгжлийн бэрхшээлтэй "
+    "иргэдийн эрх, гэр бүлийн хүчирхийлэл, ажлын байрны дарамт зэрэг "
+    "сэдвээр зөвлөгөө өгөхөд бэлэн. Холбогдох асуултаа бичээрэй."
+)
 
 _CLARIFICATION_RESPONSE = (
     "Та ямар сэдвээр мэдээлэл авахыг хүсэж байна вэ?\n"
@@ -99,6 +121,59 @@ _UNCLEAR_INTENT_RESPONSE = (
     "Таны асуултыг бүрэн ойлгосонгүй. "
     "Та асуултаа арай дэлгэрэнгүй бичиж өгнө үү?"
 )
+
+# Returned when the user writes in Latin transliteration instead of Cyrillic.
+_LATIN_ONLY_RESPONSE = (
+    "Уучлаарай, одоогоор би зөвхөн кирилл үсэг ойлгож байна. "
+    "Та асуултаа монгол кирилл үсгээр бичиж өгнө үү."
+)
+
+# Cheap detector for "does this text contain any Cyrillic character".
+_CYRILLIC_CHAR_RE = re.compile(r"[Ѐ-ӿ]")
+
+
+# ── Latin → Cyrillic transliteration (Mongolian) ─────────────────────────
+# Informal romanisation users type when they lack a Cyrillic keyboard.
+# Imperfect by design: Mongolian distinguishes ө/ү/э which collapse onto
+# Latin "o"/"u"/"e", so a small number of words will be misspelled. The
+# rewritten query is still a much better retrieval target than raw Latin,
+# and if retrieval yields nothing we fall back to a "please use Cyrillic"
+# nudge below.
+_LATIN_DIGRAPHS: tuple[tuple[str, str], ...] = (
+    ("shch", "щ"),
+    ("yo", "ё"),
+    ("yu", "ю"),
+    ("ya", "я"),
+    ("sh", "ш"),
+    ("ch", "ч"),
+    ("ts", "ц"),
+    ("kh", "х"),
+    ("zh", "ж"),
+    ("ee", "ээ"),
+    ("oo", "оо"),
+    ("uu", "уу"),
+    ("aa", "аа"),
+    ("ii", "ий"),
+    ("ai", "ай"),
+    ("ei", "эй"),
+    ("oi", "ой"),
+    ("ui", "уй"),
+)
+_LATIN_SINGLE: dict[str, str] = {
+    "a": "а", "b": "б", "c": "ц", "d": "д", "e": "э", "f": "ф",
+    "g": "г", "h": "х", "i": "и", "j": "ж", "k": "к", "l": "л",
+    "m": "м", "n": "н", "o": "о", "p": "п", "q": "к", "r": "р",
+    "s": "с", "t": "т", "u": "у", "v": "в", "w": "в", "x": "х",
+    "y": "й", "z": "з",
+}
+
+
+def _transliterate_latin_to_cyrillic(text: str) -> str:
+    """Best-effort Latin → Mongolian Cyrillic conversion (lowercase output)."""
+    out = text.lower()
+    for latin, cyr in _LATIN_DIGRAPHS:
+        out = out.replace(latin, cyr)
+    return "".join(_LATIN_SINGLE.get(ch, ch) for ch in out)
 
 # ── Capability intent: robust two-group matching ────────────────────────
 # A query is a capability question iff it contains (A) a SELF token
@@ -239,16 +314,43 @@ class ChatService:
         self.rag = rag
         self.generator = AnswerGenerator(config=rag.config)
 
-    def process_query(self, query: str, category: Optional[str] = None) -> dict:
+    def process_query(
+        self,
+        query: str,
+        category: Optional[str] = None,
+        history: Optional[list[dict]] = None,
+    ) -> dict:
         """
         Process a user query through the full pipeline.
 
         The LLM is only called for substantive topical questions with
         retrieved context. All other paths return immediately.
+
+        ``history`` is a list of {"role": "user"|"assistant", "content": str}
+        from the current chat session (oldest first). When non-empty, the
+        retrieval query is rewritten to be standalone so follow-ups like
+        "ямар байгууллагад хандах вэ" inherit the prior topic.
         """
         start_time = time.time()
+
+        # If the user typed in Latin (no Cyrillic chars), best-effort
+        # transliterate before routing so retrieval gets a Cyrillic query.
+        # The original wording is preserved for the DB log via `original_query`.
+        original_query = query
+        was_latin_input = bool(query) and not _CYRILLIC_CHAR_RE.search(query)
+        if was_latin_input:
+            transliterated = _transliterate_latin_to_cyrillic(query)
+            _log_route("latin_translit", f"{original_query} → {transliterated}")
+            query = transliterated
+
         normalized = _normalize(query)
         has_crisis = _has_crisis_indicator(query)
+        history = [
+            h for h in (history or [])
+            if h.get("role") in ("user", "assistant")
+            and (h.get("content") or "").strip()
+        ]
+        has_prior_context = any(h["role"] == "assistant" for h in history)
 
         # Default "safe" result used by every shortcut that bypasses the classifier.
         safe_result = {
@@ -294,7 +396,9 @@ class ChatService:
             )
 
         # ── Step 2: Greeting shortcut — skip the LLM ─────────────────────
-        if normalized in _GREETINGS:
+        # Matches bare greetings ("сайн уу") and trailing-word forms
+        # ("сайн уу найз", "саину наиз" from Latin transliteration).
+        if normalized in _GREETINGS or _GREETING_PATTERN_RE.match(normalized):
             _log_route("greeting", query)
             return self._build_response(
                 query=query,
@@ -339,7 +443,12 @@ class ChatService:
         # Bare "туслаач", "яах вэ", "хаана хандах вэ" etc. → clarification.
         # Very short queries also fall through here, but capability questions
         # were already handled in Step 1 so they don't hit this branch.
-        if normalized in _VAGUE_QUERIES or len(normalized) <= 5:
+        # If we have prior chat context, skip this — the user is most likely
+        # asking a follow-up that needs to be resolved with retrieval, not
+        # answered with a generic clarification message.
+        if not has_prior_context and (
+            normalized in _VAGUE_QUERIES or len(normalized) <= 5
+        ):
             _log_route("vague_shortcut", query)
             return self._build_response(
                 query=query,
@@ -364,22 +473,38 @@ class ChatService:
                 start_time=start_time,
             )
 
-        # Single shared corpus — retrieve directly from the user's query.
-        retrieved = self.rag.search(query)
+        # Resolve follow-up questions against the prior turns so retrieval
+        # sees the full intent. With no history this is a no-op.
+        search_query = query
+        if has_prior_context and self.generator is not None:
+            rewritten = self.generator.rewrite_query(query, history)
+            if rewritten and rewritten.strip() and rewritten != query:
+                _log_route("rewrite", rewritten)
+                search_query = rewritten
+
+        retrieved = self.rag.search(search_query)
 
         if not retrieved:
+            # Latin input whose transliteration didn't match anything in
+            # the corpus is most likely just bad transliteration — nudge
+            # the user to retype in Cyrillic instead of returning a vague
+            # "didn't understand" message.
+            fallback_answer = (
+                _LATIN_ONLY_RESPONSE if was_latin_input else _UNCLEAR_INTENT_RESPONSE
+            )
+            fallback_model = "latin_shortcut" if was_latin_input else "unclear_intent"
             _log_route("fallback:no_retrieval", query)
             return self._build_response(
-                query=query,
-                answer=_UNCLEAR_INTENT_RESPONSE,
+                query=original_query,
+                answer=fallback_answer,
                 sources=[],
                 safety_result=safety_result,
-                model_used="unclear_intent",
+                model_used=fallback_model,
                 tokens_used=0,
                 start_time=start_time,
             )
 
-        rag_result = self.generator.generate(query, retrieved)
+        rag_result = self.generator.generate(search_query, retrieved)
         route_label = rag_result.get("model_used") or "retrieval"
         if route_label == "faq_direct":
             _log_route("faq", query)

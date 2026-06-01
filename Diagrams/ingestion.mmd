@@ -1,0 +1,15 @@
+flowchart LR
+    A["PDF / TXT documents<br/>in data/raw/"] --> B["scripts/ingest.py"]
+    B --> C["Document loader<br/>PyMuPDF for PDF"]
+    C --> D["Chunker<br/>500 chars + 50 overlap"]
+    D --> E["bge-m3 embedding<br/>1024-dim vectors"]
+    E --> F[("ChromaDB upsert<br/>collection: boloroo_corpus")]
+    D --> G[("SQLite<br/>documents + chunks tables")]
+
+    classDef step fill:#e6f5d0,stroke:#5b8a3c,color:#000
+    classDef io fill:#fff3b0,stroke:#a07c00,color:#000
+    classDef store fill:#dbe9ff,stroke:#3a6db5,color:#000
+
+    class A io
+    class B,C,D,E step
+    class F,G store

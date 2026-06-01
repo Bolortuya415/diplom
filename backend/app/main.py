@@ -12,6 +12,15 @@ import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+# Force UTF-8 on stdout/stderr so the chat service's print() of Cyrillic
+# query text does not raise UnicodeEncodeError under Windows cp1252.
+# Must happen before any module that uses print() is imported.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,7 +34,6 @@ from backend.app.core.config import (
 from backend.app.db.database import init_db
 from backend.app.api import routes
 from backend.app.services.chat_service import ChatService
-from backend.app.services.ingest_service import IngestService
 
 
 @asynccontextmanager
@@ -49,16 +57,12 @@ async def lifespan(app: FastAPI):
     ))
     rag.initialize()
 
-    # Initialize chat service (uses RAG + classifier + LLM generator)
+    # Initialize chat service (uses RAG + LLM generator)
     chat_svc = ChatService()
     chat_svc.initialize_with_rag(rag)
 
-    # Initialize ingest service (uses RAG only, no LLM)
-    ingest_svc = IngestService(rag)
-
     # Inject into routes
     routes.chat_service = chat_svc
-    routes.ingest_service = ingest_svc
 
     print("Backend ready.")
     yield

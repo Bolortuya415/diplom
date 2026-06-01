@@ -1285,24 +1285,33 @@ button { font-family: inherit; }
 .lp-stat:last-child { border-right: none; }
 
 .lp-stat-num {
-  font-size: 2.2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 2.4rem;
   font-weight: 800;
   color: var(--primary);
   letter-spacing: -0.03em;
   line-height: 1;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .lp-stat-unit {
-  font-size: 1rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
 }
 
 .lp-stat-desc {
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
-  line-height: 1.4;
+  line-height: 1.45;
+  max-width: 280px;
+  margin: 0 auto;
 }
 
 /* Section headers ─────────────────────────────────────── */
@@ -1341,6 +1350,7 @@ button { font-family: inherit; }
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 24px;
+  align-items: stretch; /* let cards stretch to the same row height */
 }
 
 .lp-info-card {
@@ -1349,6 +1359,10 @@ button { font-family: inherit; }
   border-radius: var(--radius-xl);
   padding: 28px 24px;
   transition: transform 0.2s, box-shadow 0.2s;
+  /* Column layout so we can pin bullets to a consistent baseline. */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .lp-info-card:hover {
@@ -1366,6 +1380,7 @@ button { font-family: inherit; }
   align-items: center;
   justify-content: center;
   margin-bottom: 18px;
+  flex-shrink: 0;
 }
 
 .lp-info-card h3 {
@@ -1374,6 +1389,9 @@ button { font-family: inherit; }
   color: var(--text);
   margin-bottom: 10px;
   letter-spacing: -0.01em;
+  line-height: 1.3;
+  /* Reserve room for 2 lines so short and long titles align across cards. */
+  min-height: calc(1.05rem * 1.3 * 2);
 }
 
 .lp-info-body {
@@ -1381,6 +1399,8 @@ button { font-family: inherit; }
   color: var(--text-secondary);
   line-height: 1.65;
   margin-bottom: 16px;
+  /* Body fills available space → bullets sit at the same offset in every card. */
+  flex-grow: 1;
 }
 
 .lp-info-bullets {
@@ -1810,6 +1830,211 @@ button { font-family: inherit; }
 }
 
 .cw-msg p { white-space: pre-wrap; margin: 0; }
+
+/* Inline clickable [N] citations inside the assistant answer */
+.cw-cite {
+  display: inline;
+  padding: 0 3px;
+  margin: 0 1px;
+  background: var(--accent-soft, #f0fdfa);
+  border: 1px solid var(--accent, #14b8a6);
+  border-radius: 6px;
+  color: var(--accent, #14b8a6);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+  transition: background 0.15s, color 0.15s;
+  vertical-align: baseline;
+}
+
+.cw-cite:hover {
+  background: var(--accent, #14b8a6);
+  color: #fff;
+}
+
+/* Source list panel under the assistant message */
+.cw-sources {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.cw-sources-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted, #64748b);
+  margin-bottom: 6px;
+}
+
+.cw-sources-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cw-src-item {
+  font-size: 0.78rem;
+  background: var(--accent-soft, #f0fdfa);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  transition: background 0.2s, border-color 0.2s;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cw-src-item:hover {
+  border-color: var(--accent, #14b8a6);
+}
+
+.cw-src-item:focus {
+  outline: 2px solid var(--accent, #14b8a6);
+  outline-offset: 1px;
+}
+
+.cw-src-toggle {
+  margin-left: auto;
+  color: var(--muted, #64748b);
+  font-size: 0.85rem;
+}
+
+.cw-src-flash {
+  background: var(--accent, #14b8a6) !important;
+  border-color: var(--accent, #14b8a6) !important;
+  color: #fff;
+}
+
+.cw-src-flash .cw-src-num,
+.cw-src-flash .cw-src-title,
+.cw-src-flash .cw-src-page,
+.cw-src-flash .cw-src-snippet,
+.cw-src-flash .cw-src-law {
+  color: #fff !important;
+  border-color: #fff !important;
+}
+
+.cw-src-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.cw-src-num {
+  font-weight: 700;
+  color: var(--accent, #14b8a6);
+}
+
+.cw-src-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cw-src-page {
+  font-size: 0.72rem;
+  color: var(--muted, #64748b);
+  padding: 0 4px;
+  border-left: 1px solid var(--border);
+}
+
+.cw-src-snippet {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-style: italic;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cw-src-item.expanded .cw-src-snippet {
+  -webkit-line-clamp: unset;
+  display: block;
+  overflow: visible;
+}
+
+.cw-src-laws {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cw-src-law {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted, #64748b);
+}
+
+/* Inactivity-triggered 1-5 rating prompt (replaces the old thumbs UI). */
+.cw-feedback-card {
+  background: var(--accent-soft, #f0fdfa);
+  border: 1px solid var(--accent, #14b8a6);
+}
+
+.cw-feedback-card.err {
+  background: #fef2f2;
+  border-color: #dc2626;
+}
+
+.cw-rating-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cw-rating-btn {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--accent, #14b8a6);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent, #14b8a6);
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+}
+
+.cw-rating-btn:hover:not(:disabled) {
+  background: var(--accent, #14b8a6);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.cw-rating-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cw-rating-btn.is-active {
+  background: var(--accent, #14b8a6);
+  color: #fff;
+}
+
+.cw-feedback-thanks {
+  font-weight: 500;
+  color: var(--accent, #14b8a6);
+}
+
+.cw-feedback-thanks-rating {
+  color: var(--muted, #64748b);
+  font-weight: 400;
+}
 
 /* Suggested-question chips shown before the user has typed anything */
 .cw-examples {

@@ -1,10 +1,10 @@
 const API_BASE = '/api';
 
-export async function sendChat(message) {
+export async function sendChat(message, history = []) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, history }),
   });
   if (!res.ok) {
     let detail = `Chat failed: ${res.status}`;
@@ -17,43 +17,17 @@ export async function sendChat(message) {
   return res.json();
 }
 
-export async function submitFeedback(chatId, rating, comment = null) {
+export async function submitFeedback(chatId, rating, { sessionId = null, comment = null } = {}) {
   const res = await fetch(`${API_BASE}/feedback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, rating, comment }),
+    body: JSON.stringify({
+      chat_id: chatId,
+      rating,
+      comment,
+      session_id: sessionId,
+    }),
   });
   if (!res.ok) throw new Error(`Feedback failed: ${res.status}`);
-  return res.json();
-}
-
-export async function uploadDocument(file, title = null) {
-  const form = new FormData();
-  form.append('file', file);
-  if (title) form.append('title', title);
-
-  const res = await fetch(`${API_BASE}/ingest`, {
-    method: 'POST',
-    body: form,
-  });
-  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-  return res.json();
-}
-
-export async function getDocuments() {
-  const res = await fetch(`${API_BASE}/documents`);
-  if (!res.ok) throw new Error(`Fetch docs failed: ${res.status}`);
-  return res.json();
-}
-
-export async function getHealth() {
-  const res = await fetch(`${API_BASE}/health`);
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-  return res.json();
-}
-
-export async function getStats() {
-  const res = await fetch(`${API_BASE}/stats`);
-  if (!res.ok) throw new Error(`Stats failed: ${res.status}`);
   return res.json();
 }

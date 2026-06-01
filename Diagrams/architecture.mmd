@@ -1,0 +1,55 @@
+flowchart TB
+    subgraph Client["Client layer"]
+        Browser["Хэрэглэгчийн браузер"]
+        UI["React + Vite<br/>Chat UI"]
+    end
+
+    subgraph Backend["Backend (FastAPI, port 8000)"]
+        API["REST API<br/>/chat &nbsp; /feedback &nbsp; /health"]
+        Chat["ChatService"]
+        Router["Route classifier<br/>(regex shortcuts)"]
+        RAG["RAG Pipeline"]
+        Embed["bge-m3 embedding<br/>(1024-dim, multilingual)"]
+        Rerank["bge-reranker-v2-m3<br/>(cross-encoder)"]
+    end
+
+    subgraph Stores["Storage"]
+        Chroma[("ChromaDB<br/>1,897 chunks<br/>persistent")]
+        SQL[("SQLite<br/>chat_logs, feedback")]
+    end
+
+    Gemini["Google Gemini 2.5 Flash<br/>(REST API, external)"]
+
+    subgraph Offline["Offline ingestion (scripts/ingest.py)"]
+        direction LR
+        Docs["PDF / TXT<br/>corpus"]
+        Ingest["ingest.py CLI"]
+        Docs --> Ingest
+    end
+
+    Browser --> UI
+    UI -- "HTTP / JSON" --> API
+    API --> Chat
+    Chat --> Router
+    Chat --> RAG
+    RAG --> Embed
+    Embed --> Chroma
+    Embed --> Rerank
+    Rerank -- "top-4 contexts" --> Gemini
+    Gemini -- "answer" --> Chat
+    Chat --> SQL
+
+    Ingest -. "embed + upsert" .-> Chroma
+    Ingest -. "metadata" .-> SQL
+
+    classDef client fill:#dbe9ff,stroke:#3a6db5,color:#000
+    classDef backend fill:#e6f5d0,stroke:#5b8a3c,color:#000
+    classDef store fill:#fff3b0,stroke:#a07c00,color:#000
+    classDef external fill:#fde0dc,stroke:#a32220,color:#000
+    classDef offline fill:#e8e3d8,stroke:#6b6353,color:#000
+
+    class Browser,UI client
+    class API,Chat,Router,RAG,Embed,Rerank backend
+    class Chroma,SQL store
+    class Gemini external
+    class Docs,Ingest offline
